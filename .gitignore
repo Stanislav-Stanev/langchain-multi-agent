@@ -1,0 +1,11 @@
+# Тайни - API ключове
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Локално състояние на LangGraph Studio dev сървъра
+.langgraph_api/

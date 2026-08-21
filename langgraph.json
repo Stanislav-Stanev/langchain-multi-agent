@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "sdlc_team": "./src/graph.py:graph"
+  },
+  "env": ".env"
+}

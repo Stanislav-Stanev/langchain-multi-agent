@@ -28,9 +28,9 @@
 [ -n "$CLAUDE_DOCS_HOOK_RUNNING" ] && exit 0
 export CLAUDE_DOCS_HOOK_RUNNING=1
 
-# Файловете, които hook-ът поддържа актуални
-DOC_FILES="CLAUDE.md README.md requirements.txt CHANGELOG.md"
-DOC_PATTERN='^(CLAUDE\.md|README\.md|requirements\.txt|CHANGELOG\.md)$'
+# Файловете, които hook-ът поддържа актуални (README-тата са огледални bg/en)
+DOC_FILES="CLAUDE.md README.md README.en.md requirements.txt CHANGELOG.md"
+DOC_PATTERN='^(CLAUDE\.md|README\.md|README\.en\.md|requirements\.txt|CHANGELOG\.md)$'
 
 zero=0000000000000000000000000000000000000000
 
@@ -59,9 +59,9 @@ while read local_ref local_sha remote_ref remote_sha; do
     # прекъсването; пускаме го без нова проверка.
     git log -1 --pretty=%s "$local_sha" | grep -q '^docs-sync:' && continue
 
-    # Ако документите имат незакомитнати промени, не пипаме нищо -
-    # иначе бихме закомитнали чужда недовършена работа.
-    if [ -n "$(git status --porcelain -- $DOC_FILES)" ]; then
+    # Ако документите (или i18n текстовете) имат незакомитнати промени,
+    # не пипаме нищо - иначе бихме закомитнали чужда недовършена работа.
+    if [ -n "$(git status --porcelain -- $DOC_FILES src/i18n.py)" ]; then
         echo "[pre-push] Незакомитнати промени по документацията - прескачам синхронизацията."
         continue
     fi
@@ -87,13 +87,13 @@ while read local_ref local_sha remote_ref remote_sha; do
 
     echo "[pre-push] Claude проверява документацията и release notes спрямо качваните комити..."
 
-    claude -p "Предстои git push на feature клон. Прегледай промените, които ще се качат: git diff $diff_spec (и git log при нужда). Задачи: (1) Провери дали CLAUDE.md, README.md и requirements.txt са все още точни спрямо тези промени и обнови САМО това, което промените са направили невярно или непълно (нови/премахнати зависимости -> requirements.txt; нова функционалност, команди, файлове или променена архитектура -> README.md и CLAUDE.md; спазвай стила им - български, обяснителен). (2) Ако качваните комити добавят или променят ЗАВЪРШЕНА, видима за потребителя функционалност, добави кратък запис за нея в CHANGELOG.md под секцията [Unreleased] в подходящата подсекция (Добавено/Променено/Поправено, формат Keep a Changelog); дребни вътрешни промени НЕ се вписват. Ако вече има точен запис за същата функционалност, не дублирай. Ако нищо не е остаряло и няма нова функционалност - не пипай нищо. НЕ прави git commit и НЕ променяй други файлове." \
+    claude -p "Предстои git push на feature клон. Прегледай промените, които ще се качат: git diff $diff_spec (и git log при нужда). Задачи: (1) Провери дали CLAUDE.md, README.md, README.en.md и requirements.txt са все още точни спрямо тези промени и обнови САМО това, което промените са направили невярно или непълно (нови/премахнати зависимости -> requirements.txt; нова функционалност, команди, файлове или променена архитектура -> README.md, README.en.md и CLAUDE.md). (2) ДВУЕЗИЧНОСТ: README.md (български) и README.en.md (английски) са огледални - ако промяна засяга единия, огледай я и в другия; ако качваните комити добавят потребителски текстове в кода, те трябва да минават през src/i18n.py (или per-language dict) с ВЕРСИИ И ЗА bg, И ЗА en - при липсващ превод го допълни. (3) Ако качваните комити добавят или променят ЗАВЪРШЕНА, видима за потребителя функционалност, добави кратък запис за нея в CHANGELOG.md под секцията [Unreleased] в подходящата подсекция (Добавено/Променено/Поправено, формат Keep a Changelog); дребни вътрешни промени НЕ се вписват. Ако вече има точен запис за същата функционалност, не дублирай. Стил на документацията: README.md/CHANGELOG.md - български; README.en.md - английски. Ако нищо не е остаряло и няма нова функционалност - не пипай нищо. НЕ прави git commit и НЕ променяй други файлове освен изброените документационни и src/i18n.py при липсващ превод." \
       --allowedTools "Read,Glob,Grep,Edit,Write,Bash(git diff:*),Bash(git status:*),Bash(git log:*),Bash(git show:*)" \
       || { echo "[pre-push] Claude не успя - push-ът продължава без обновяване на документацията."; continue; }
 
     # Ако Claude е променил нещо - отделен docs-sync комит и прекъсваме push-а
-    if [ -n "$(git status --porcelain -- $DOC_FILES)" ]; then
-        git add $DOC_FILES
+    if [ -n "$(git status --porcelain -- $DOC_FILES src/i18n.py)" ]; then
+        git add $DOC_FILES src/i18n.py
         git commit -m "docs-sync: автоматична синхронизация на документация и release notes
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>" --no-verify

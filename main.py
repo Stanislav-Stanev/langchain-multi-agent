@@ -5,6 +5,8 @@
     python main.py                      -> демо задача (тикет DEV-101)
     python main.py "твоя задача тук"    -> собствена задача
 
+Език на интерфейса и агентите: APP_LANG=bg|en в .env (по подразбиране bg).
+
 Примери за задачи:
     python main.py "Имплементирай тикет DEV-102"
     python main.py "Напиши функция, която обръща string наобратно"
@@ -14,7 +16,7 @@
   2. вътрешната работа на всеки агент (кой инструмент вика,
      с какви аргументи и какво връща инструментът);
   3. финалния отговор на всеки агент;
-  4. накрая - обобщение на маршрута през графа.
+  4. накрая - обобщение на маршрута, токъните и цената.
 """
 
 import sys
@@ -24,9 +26,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from src.config import estimate_cost_usd
 from src.graph import build_graph, extract_text
-
-# Демо задача по подразбиране - реферира тикет от "тикет системата"
-DEFAULT_TASK = "Имплементирай тикет DEV-101 и се увери, че кодът е качествен."
+from src.i18n import t
 
 LINE = "=" * 70
 THIN = "-" * 70
@@ -35,10 +35,10 @@ THIN = "-" * 70
 # какво ще наблюдаваме по време на изпълнението.
 ARCHITECTURE = r"""
                         +--------------+
-        потребител ---> |  SUPERVISOR  | <--- връща се след всеки агент
-                        +--------------+
-                         /     |      \
-                        v      v       v
+             user --->  |  SUPERVISOR  | <---+
+                        +--------------+     |
+                         /     |      \      |
+                        v      v       v     |
                   +--------+ +-----------+ +------+
                   |ANALYST | | DEVELOPER | |  QA  |
                   +--------+ +-----------+ +------+
@@ -50,7 +50,7 @@ def shorten(text, limit: int = 250) -> str:
     text = str(text).strip().replace("\n", " ")
     if len(text) <= limit:
         return text
-    return text[:limit] + f"... [съкратено, общо {len(text)} символа]"
+    return text[:limit] + t("shortened", total=len(text))
 
 
 def indent(text: str, prefix: str = "  ") -> str:
@@ -64,13 +64,13 @@ def main() -> None:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
     # Взимаме задачата от командния ред или ползваме демото
-    task = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_TASK
+    task = sys.argv[1] if len(sys.argv) > 1 else t("default_task")
 
     print(LINE)
-    print("МУЛТИАГЕНТНА SDLC СИСТЕМА (Supervisor + Analyst + Developer + QA)")
+    print(t("app_title"))
     print(LINE)
     print(ARCHITECTURE)
-    print(f"Задача: {task}")
+    print(f"{t('task_label')}: {task}")
 
     # Сглобяваме графа (виж src/graph.py за архитектурата)
     graph = build_graph()
@@ -109,12 +109,12 @@ def main() -> None:
                     nxt = update["next"]
                     route.append(nxt)
                     print(f"\n{THIN}")
-                    print(f"СТЪПКА {step_no} | SUPERVISOR решава: -> {nxt.upper()}")
-                    print(f"  Причина: {update['reason']}")
+                    print(t("step_supervisor", n=step_no, next=nxt.upper()))
+                    print(t("reason", reason=update["reason"]))
                     if nxt != "FINISH":
-                        print(f"  Управлението преминава към [{nxt.upper()}]:")
+                        print(t("handoff", agent=nxt.upper()))
                 elif update.get("messages"):
-                    print(f"\nСТЪПКА {step_no} | [{node_name.upper()}] финален отговор:")
+                    print("\n" + t("final_answer", n=step_no, agent=node_name.upper()))
                     print(indent(extract_text(update["messages"][-1].content), "  | "))
         else:
             # --- Събитие ОТВЪТРЕ в агент (неговият ReAct цикъл) ----------
@@ -125,36 +125,44 @@ def main() -> None:
                     if isinstance(msg, AIMessage) and msg.tool_calls:
                         for tc in msg.tool_calls:
                             tool_calls_count += 1
-                            print(f"    [{worker}] вика инструмент: {tc['name']}({tc['args']})")
+                            print(t("tool_call", agent=worker, tool=tc["name"], args=tc["args"]))
                     elif isinstance(msg, ToolMessage):
-                        print(f"    [{worker}] <- {msg.name}: {shorten(extract_text(msg.content))}")
+                        print(t(
+                            "tool_result",
+                            agent=worker,
+                            tool=msg.name,
+                            result=shorten(extract_text(msg.content)),
+                        ))
 
     # --- Финално обобщение на процеса ------------------------------------
     print(f"\n{LINE}")
-    print("ОБОБЩЕНИЕ НА ПРОЦЕСА")
+    print(t("summary_title"))
     print(LINE)
-    print("Маршрут: START -> " + " -> ".join(route))
-    print(f"Стъпки в главния граф: {step_no} | Извиквания на инструменти: {tool_calls_count}")
-    print("Консумирани токъни и цена:")
+    print(t("route", route="START -> " + " -> ".join(route)))
+    print(t("steps_line", steps=step_no, tools=tool_calls_count))
+    print(t("tokens_title"))
     if usage_cb.usage_metadata:
         total_cost = 0.0
         for model, u in usage_cb.usage_metadata.items():
             cost = estimate_cost_usd(model, u)
             if cost is None:
-                cost_label = "$0.00 (локален модел)"
+                cost_label = t("local_model_cost")
             else:
                 total_cost += cost
                 cost_label = f"~${cost:.4f}"
-            print(
-                f"  {model}: вход {u.get('input_tokens', 0):,} | "
-                f"изход {u.get('output_tokens', 0):,} | "
-                f"общо {u.get('total_tokens', 0):,} | {cost_label}"
-            )
+            print(t(
+                "token_line",
+                model=model,
+                inp=f"{u.get('input_tokens', 0):,}",
+                out=f"{u.get('output_tokens', 0):,}",
+                total=f"{u.get('total_tokens', 0):,}",
+                cost=cost_label,
+            ))
         if total_cost > 0:
-            print(f"  Обща цена: ~${total_cost:.4f}")
+            print(t("total_cost", cost=f"{total_cost:.4f}"))
     else:
-        print("  (моделът не върна данни за токъни)")
-    print("ГОТОВО - задачата премина през целия SDLC процес.")
+        print(t("no_token_data"))
+    print(t("done"))
     print(LINE)
 
 

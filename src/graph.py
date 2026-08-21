@@ -37,6 +37,7 @@ from pydantic import BaseModel, Field
 
 from src.agents import create_analyst, create_developer, create_qa
 from src.config import get_llm
+from src.i18n import get_lang
 
 # Имената на работните агенти - изнесени като константа, за да ги
 # ползваме и в промпта, и в routing логиката, без разминаване.
@@ -81,7 +82,10 @@ class SupervisorDecision(BaseModel):
     )
 
 
-SUPERVISOR_PROMPT = f"""Ти си Team Lead (супервайзор) на софтуерен екип от агенти.
+# Промптът на супервайзора - на двата езика (избира се с APP_LANG при
+# сглобяването на графа; езикът на промпта определя и езика на 'reason').
+SUPERVISOR_PROMPTS = {
+    "bg": """Ти си Team Lead (супервайзор) на софтуерен екип от агенти.
 
 Твоят екип (типичен SDLC процес):
 - analyst:   анализира изисквания и тикети, пише спецификация. Работи ПЪРВИ.
@@ -98,7 +102,26 @@ SUPERVISOR_PROMPT = f"""Ти си Team Lead (супервайзор) на соф
 - Когато qa одобри кода (APPROVED), избери FINISH.
 - Ако задачата изобщо не е софтуерна, избери FINISH веднага.
 
-Отговори само със структурираното решение."""
+Отговори само със структурираното решение.""",
+    "en": """You are the Team Lead (supervisor) of a team of software agents.
+
+Your team (a typical SDLC process):
+- analyst:   analyzes requirements and tickets, writes a specification. Works FIRST.
+- developer: writes Python code following the analyst's specification.
+- qa:        verifies the developer's code against the requirements.
+
+Your job: based on the conversation history, decide WHICH agent works
+next. The standard flow is analyst -> developer -> qa -> FINISH.
+
+Rules:
+- Do not skip phases: no developer without a spec from analyst,
+  no qa without code from developer.
+- If qa returns NEEDS_WORK, send the task back to developer for fixes.
+- When qa approves the code (APPROVED), choose FINISH.
+- If the task is not a software task at all, choose FINISH immediately.
+
+Answer only with the structured decision.""",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +146,10 @@ def make_supervisor_node(supervisor_llm):
 
     def supervisor_node(state: MessagesState) -> dict:
         decision = supervisor_llm.invoke(
-            [{"role": "system", "content": SUPERVISOR_PROMPT}, *state["messages"]]
+            [
+                {"role": "system", "content": SUPERVISOR_PROMPTS[get_lang()]},
+                *state["messages"],
+            ]
         )
 
         return {"next": decision.next, "reason": decision.reason}

@@ -38,6 +38,8 @@ langchain-multi-agent/
 ├── main.py              # входна точка — стартира графа
 ├── requirements.txt     # зависимости
 ├── .env.example         # шаблон за API ключа (копирай като .env)
+├── .githooks/
+│   └── pre-commit       # hook: Claude синхронизира документацията при комит
 └── src/
     ├── config.py        # настройки + фабрика за LLM клиента
     ├── tools.py         # инструментите (mock Jira, линтер, QA чеклист)
@@ -69,6 +71,24 @@ python main.py
 # ...или със собствена задача
 python main.py "Имплементирай тикет DEV-102"
 python main.py "Напиши функция, която обръща string наобратно"
+```
+
+## Автоматична синхронизация на документацията (git hook)
+
+В `.githooks/pre-commit` живее hook, който преди всеки комит пуска
+**Claude Code в headless режим** (`claude -p`): той преглежда staged
+промените и ако са направили CLAUDE.md, README.md или requirements.txt
+неточни, ги обновява и добавя корекциите към **същия комит** — така в
+remote винаги отива актуална документация.
+
+```bash
+# Активиране (еднократно след клониране — git не изпълнява hook-ове
+# от репото по подразбиране, от съображения за сигурност)
+git config core.hooksPath .githooks
+
+# Прескачане при нужда
+git commit --no-verify              # прескача всички hook-ове
+SKIP_DOCS_UPDATE=1 git commit ...   # прескача само този
 ```
 
 ## Ключови концепции, които проектът демонстрира

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A Bulgarian-language **teaching project**: a multi-agent SDLC system (Supervisor + Analyst + Developer + QA) built on LangChain 1.x + LangGraph 1.x. All code comments, docstrings, prompts, and console output are in Bulgarian and deliberately verbose/explanatory — keep that style when editing. There are no tests and no linter; this is not a git repository.
+A Bulgarian-language **teaching project**: a multi-agent SDLC system (Supervisor + Analyst + Developer + QA) built on LangChain 1.x + LangGraph 1.x. All code comments, docstrings, prompts, and console output are in Bulgarian and deliberately verbose/explanatory — keep that style when editing. There are no tests and no linter.
 
 ## Commands
 
@@ -27,7 +27,14 @@ Windows + PowerShell project. Use the venv executables directly (no activation n
 
 # Offline model (one-time, ~5 GB)
 ollama pull qwen3:8b
+
+# Activate the docs-sync pre-commit hook (one-time after cloning)
+git config core.hooksPath .githooks
 ```
+
+## Git hooks
+
+`.githooks/pre-commit` runs `claude -p` (headless) before every commit to check whether the staged changes made CLAUDE.md / README.md / requirements.txt inaccurate, and stages any updates into the same commit. It is opt-in via `git config core.hooksPath .githooks`. Skip it with `git commit --no-verify` (all hooks) or `SKIP_DOCS_UPDATE=1 git commit` (this hook only); it also no-ops when only the three doc files are staged, and guards against nested invocation via `CLAUDE_DOCS_HOOK_RUNNING`.
 
 ## Architecture
 

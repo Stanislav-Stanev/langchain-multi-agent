@@ -38,8 +38,10 @@ langchain-multi-agent/
 ├── main.py              # входна точка — стартира графа
 ├── requirements.txt     # зависимости
 ├── .env.example         # шаблон за API ключа (копирай като .env)
+├── CHANGELOG.md         # release notes (Keep a Changelog)
 ├── .githooks/
-│   └── pre-push         # hook: Claude синхронизира документацията при push
+│   ├── pre-commit       # hook: пази main от директни комити
+│   └── pre-push         # hook: пази main + Claude синхронизира docs/changelog
 └── src/
     ├── config.py        # настройки + фабрика за LLM клиента
     ├── tools.py         # инструментите (mock Jira, линтер, QA чеклист)
@@ -73,16 +75,41 @@ python main.py "Имплементирай тикет DEV-102"
 python main.py "Напиши функция, която обръща string наобратно"
 ```
 
-## Автоматична синхронизация на документацията (git hook)
+## Работен процес (branching)
 
-В `.githooks/pre-push` живее hook, който преди всеки push пуска
-**Claude Code в headless режим** (`claude -p`): той преглежда всички
-комити, които предстои да се качат, и ако са направили CLAUDE.md,
-README.md или requirements.txt неточни, ги обновява в **отделен
-docs-sync комит**. Push-ът тогава се прекъсва с ясно съобщение —
-пускаш `git push` втори път и той минава веднага. Така проверката се
-случва веднъж за цяла серия комити, а в remote винаги отива актуална
-документация.
+**`main` е продукционен клон** — по него не се комитва и не се push-ва
+директно (двата git hook-а го пазят). Нова функционалност винаги минава
+през feature клон и Pull Request:
+
+```bash
+git switch -c feature/име-на-функционалността   # 1. нов feature клон
+# ... работиш, комитваш свободно ...
+git push -u origin feature/име                  # 2. качваш клона
+                                                #    (тук hook-ът обновява
+                                                #     документацията и CHANGELOG)
+gh pr create --fill                             # 3. Pull Request към main
+gh pr merge --squash --delete-branch            # 4. вливане в main
+```
+
+Release notes за всяка завършена функционалност се пазят в
+[CHANGELOG.md](CHANGELOG.md) (формат Keep a Changelog): pre-push
+hook-ът добавя записите в секцията **[Unreleased]** автоматично, а при
+release те се преместват под нов номер на версия.
+
+## Автоматична синхронизация на документацията (git hooks)
+
+В `.githooks/` живеят два hook-а:
+
+- **pre-commit** — блокира директни комити върху `main`.
+- **pre-push** — блокира директни push-ове към `main` и пуска
+  **Claude Code в headless режим** (`claude -p`): той преглежда всички
+  комити, които предстои да се качат, и ако са направили CLAUDE.md,
+  README.md, requirements.txt или CHANGELOG.md неточни, ги обновява в
+  **отделен docs-sync комит** (за нова завършена функционалност добавя
+  и запис в release notes). Push-ът тогава се прекъсва с ясно
+  съобщение — пускаш `git push` втори път и той минава веднага. Така
+  проверката се случва веднъж за цяла серия комити, а в remote винаги
+  отива актуална документация.
 
 ```bash
 # Активиране (еднократно след клониране — git не изпълнява hook-ове
@@ -91,7 +118,8 @@ git config core.hooksPath .githooks
 
 # Прескачане при нужда
 git push --no-verify              # прескача всички hook-ове
-SKIP_DOCS_UPDATE=1 git push ...   # прескача само този
+SKIP_DOCS_UPDATE=1 git push ...   # прескача само синхронизацията
+SKIP_MAIN_GUARD=1 git push ...    # прескача само защитата на main (hotfix)
 ```
 
 ## Ключови концепции, които проектът демонстрира

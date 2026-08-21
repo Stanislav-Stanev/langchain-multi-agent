@@ -39,7 +39,7 @@ langchain-multi-agent/
 ├── requirements.txt     # зависимости
 ├── .env.example         # шаблон за API ключа (копирай като .env)
 ├── .githooks/
-│   └── pre-commit       # hook: Claude синхронизира документацията при комит
+│   └── pre-push         # hook: Claude синхронизира документацията при push
 └── src/
     ├── config.py        # настройки + фабрика за LLM клиента
     ├── tools.py         # инструментите (mock Jira, линтер, QA чеклист)
@@ -75,11 +75,14 @@ python main.py "Напиши функция, която обръща string на
 
 ## Автоматична синхронизация на документацията (git hook)
 
-В `.githooks/pre-commit` живее hook, който преди всеки комит пуска
-**Claude Code в headless режим** (`claude -p`): той преглежда staged
-промените и ако са направили CLAUDE.md, README.md или requirements.txt
-неточни, ги обновява и добавя корекциите към **същия комит** — така в
-remote винаги отива актуална документация.
+В `.githooks/pre-push` живее hook, който преди всеки push пуска
+**Claude Code в headless режим** (`claude -p`): той преглежда всички
+комити, които предстои да се качат, и ако са направили CLAUDE.md,
+README.md или requirements.txt неточни, ги обновява в **отделен
+docs-sync комит**. Push-ът тогава се прекъсва с ясно съобщение —
+пускаш `git push` втори път и той минава веднага. Така проверката се
+случва веднъж за цяла серия комити, а в remote винаги отива актуална
+документация.
 
 ```bash
 # Активиране (еднократно след клониране — git не изпълнява hook-ове
@@ -87,8 +90,8 @@ remote винаги отива актуална документация.
 git config core.hooksPath .githooks
 
 # Прескачане при нужда
-git commit --no-verify              # прескача всички hook-ове
-SKIP_DOCS_UPDATE=1 git commit ...   # прескача само този
+git push --no-verify              # прескача всички hook-ове
+SKIP_DOCS_UPDATE=1 git push ...   # прескача само този
 ```
 
 ## Ключови концепции, които проектът демонстрира

@@ -1,0 +1,76 @@
+#!/bin/sh
+# Pre-push hook: преди качване в remote Claude Code (headless) преглежда
+# ВСИЧКИ комити, които предстои да се качат, и ако те са направили
+# CLAUDE.md, README.md или requirements.txt неточни, ги обновява и прави
+# ОТДЕЛЕН docs-sync комит. Push-ът тогава се прекъсва с ясно съобщение -
+# пусни `git push` отново и той минава веднага (без повторна проверка,
+# защото последният комит вече е docs-sync).
+#
+# Защо pre-push, а не pre-commit: проверката се случва ВЕДНЪЖ за цялата
+# серия комити, а не на всеки комит - по-бързо и по-евтино.
+#
+# Прескачане при нужда:
+#   git push --no-verify               (прескача всички hook-ове)
+#   SKIP_DOCS_UPDATE=1 git push ...    (прескача само този)
+#
+# Активиране след ново клониране: git config core.hooksPath .githooks
+
+[ -n "$SKIP_DOCS_UPDATE" ] && exit 0
+
+# Защита от вложено извикване (когато самият Claude изпълнява push)
+[ -n "$CLAUDE_DOCS_HOOK_RUNNING" ] && exit 0
+export CLAUDE_DOCS_HOOK_RUNNING=1
+
+# Ако последният комит е docs-sync - синхронизацията току-що е минала;
+# това е повторният push след прекъсването, пускаме го без проверка.
+git log -1 --pretty=%s | grep -q '^docs-sync:' && exit 0
+
+# Ако документите имат незакомитнати промени, не пипаме нищо -
+# иначе бихме закомитнали чужда недовършена работа.
+if [ -n "$(git status --porcelain -- CLAUDE.md README.md requirements.txt)" ]; then
+    echo "[pre-push] Незакомитнати промени по документацията - прескачам синхронизацията."
+    exit 0
+fi
+
+zero=0000000000000000000000000000000000000000
+
+# git подава по един ред на stdin за всеки ref: <local_ref> <local_sha> <remote_ref> <remote_sha>
+while read local_ref local_sha remote_ref remote_sha; do
+    # Изтриване на клон - няма какво да проверяваме
+    [ "$local_sha" = "$zero" ] && continue
+
+    if [ "$remote_sha" = "$zero" ]; then
+        # Нов клон в remote - преглеждаме комитите спрямо празно начало
+        diff_spec="$local_sha"
+        changed=$(git show --pretty=format: --name-only "$local_sha")
+    else
+        diff_spec="$remote_sha $local_sha"
+        changed=$(git diff --name-only "$remote_sha" "$local_sha")
+    fi
+
+    # Ако в качваните комити няма кодови промени (само документация) - пропускаме
+    code_changes=$(printf '%s\n' "$changed" | grep -vE '^(CLAUDE\.md|README\.md|requirements\.txt)$' | grep -v '^$')
+    [ -z "$code_changes" ] && continue
+
+    echo "[pre-push] Claude проверява документацията спрямо качваните комити..."
+
+    claude -p "Предстои git push. Прегледай промените, които ще се качат: git diff $diff_spec (и git log при нужда). Провери дали CLAUDE.md, README.md и requirements.txt са все още точни спрямо тези промени. Обнови САМО това, което промените са направили невярно или непълно: нови/премахнати зависимости -> requirements.txt; нова функционалност, команди, файлове или променена архитектура -> README.md и CLAUDE.md (спазвай стила им - български, обяснителен). Ако нищо не е остаряло - не пипай нищо. НЕ прави git commit и НЕ променяй други файлове." \
+      --allowedTools "Read,Glob,Grep,Edit,Write,Bash(git diff:*),Bash(git status:*),Bash(git log:*),Bash(git show:*)" \
+      || { echo "[pre-push] Claude не успя - push-ът продължава без обновяване на документацията."; exit 0; }
+
+    # Ако Claude е променил нещо - отделен docs-sync комит и прекъсваме push-а
+    if [ -n "$(git status --porcelain -- CLAUDE.md README.md requirements.txt)" ]; then
+        git add CLAUDE.md README.md requirements.txt
+        git commit -m "docs-sync: автоматична синхронизация на документацията
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>" --no-verify
+        echo ""
+        echo "[pre-push] Документацията беше обновена в отделен docs-sync комит."
+        echo "[pre-push] Пусни 'git push' отново - ще мине веднага, без нова проверка."
+        exit 1
+    fi
+
+    echo "[pre-push] Документацията е актуална."
+done
+
+exit 0

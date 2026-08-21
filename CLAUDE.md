@@ -28,13 +28,13 @@ Windows + PowerShell project. Use the venv executables directly (no activation n
 # Offline model (one-time, ~5 GB)
 ollama pull qwen3:8b
 
-# Activate the docs-sync pre-commit hook (one-time after cloning)
+# Activate the docs-sync pre-push hook (one-time after cloning)
 git config core.hooksPath .githooks
 ```
 
 ## Git hooks
 
-`.githooks/pre-commit` runs `claude -p` (headless) before every commit to check whether the staged changes made CLAUDE.md / README.md / requirements.txt inaccurate, and stages any updates into the same commit. It is opt-in via `git config core.hooksPath .githooks`. Skip it with `git commit --no-verify` (all hooks) or `SKIP_DOCS_UPDATE=1 git commit` (this hook only); it also no-ops when only the three doc files are staged, and guards against nested invocation via `CLAUDE_DOCS_HOOK_RUNNING`.
+`.githooks/pre-push` runs `claude -p` (headless) before every push to check whether the commits being pushed made CLAUDE.md / README.md / requirements.txt inaccurate. If so, it creates a separate `docs-sync:` commit and **aborts the push with exit 1** — the user re-runs `git push`, which passes immediately (a `docs-sync:` HEAD skips the check). Opt-in via `git config core.hooksPath .githooks`. Skip with `git push --no-verify` (all hooks) or `SKIP_DOCS_UPDATE=1 git push` (this one). It also no-ops when the pushed commits touch only the three doc files, when the doc files have uncommitted changes (never commits someone's WIP), and guards against nested invocation via `CLAUDE_DOCS_HOOK_RUNNING`.
 
 ## Architecture
 

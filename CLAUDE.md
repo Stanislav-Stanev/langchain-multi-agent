@@ -32,9 +32,15 @@ ollama pull qwen3:8b
 git config core.hooksPath .githooks
 ```
 
+## Branching workflow (enforced by hooks)
+
+**`main` is production.** Never commit or push to it directly — `.githooks/pre-commit` blocks commits on main and `.githooks/pre-push` blocks pushes to main. All work goes on a `feature/<name>` branch, pushed, then merged via PR (`gh pr create --fill` → `gh pr merge --squash --delete-branch`). Emergency escape hatches: `SKIP_MAIN_GUARD=1` or `--no-verify`.
+
+Release notes live in `CHANGELOG.md` (Keep a Changelog format, Bulgarian). Completed user-facing functionality gets an entry under `[Unreleased]` — the pre-push hook adds these automatically; on release, entries move under a version number.
+
 ## Git hooks
 
-`.githooks/pre-push` runs `claude -p` (headless) before every push to check whether the commits being pushed made CLAUDE.md / README.md / requirements.txt inaccurate. If so, it creates a separate `docs-sync:` commit and **aborts the push with exit 1** — the user re-runs `git push`, which passes immediately (a `docs-sync:` HEAD skips the check). Opt-in via `git config core.hooksPath .githooks`. Skip with `git push --no-verify` (all hooks) or `SKIP_DOCS_UPDATE=1 git push` (this one). It also no-ops when the pushed commits touch only the three doc files, when the doc files have uncommitted changes (never commits someone's WIP), and guards against nested invocation via `CLAUDE_DOCS_HOOK_RUNNING`.
+`.githooks/pre-push` also runs `claude -p` (headless) before every push to check whether the commits being pushed made CLAUDE.md / README.md / requirements.txt / CHANGELOG.md inaccurate. If so, it creates a separate `docs-sync:` commit and **aborts the push with exit 1** — the user re-runs `git push`, which passes immediately (a `docs-sync:` HEAD skips the check). Opt-in via `git config core.hooksPath .githooks`. Skip with `git push --no-verify` (all hooks) or `SKIP_DOCS_UPDATE=1 git push` (docs sync only). It also no-ops when the pushed commits touch only the doc files, when the doc files have uncommitted changes (never commits someone's WIP), and guards against nested invocation via `CLAUDE_DOCS_HOOK_RUNNING`.
 
 ## Architecture
 

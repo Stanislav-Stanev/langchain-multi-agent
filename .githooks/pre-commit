@@ -1,0 +1,23 @@
+#!/bin/sh
+# Pre-commit hook: main е ПРОДУКЦИОНЕН клон - директни комити са забранени.
+# Нова функционалност се разработва във feature клон и влиза в main
+# през Pull Request (виж README -> "Работен процес").
+#
+# Прескачане в извънредни случаи (напр. hotfix):
+#   git commit --no-verify
+#   SKIP_MAIN_GUARD=1 git commit ...
+
+[ -n "$SKIP_MAIN_GUARD" ] && exit 0
+
+branch=$(git symbolic-ref --short HEAD 2>/dev/null)
+if [ "$branch" = "main" ]; then
+    echo "[pre-commit] ЗАБРАНЕНО: main е продукционен клон - не се комитва директно."
+    echo ""
+    echo "  Създай feature клон и работи там:"
+    echo "      git switch -c feature/<име-на-функционалността>"
+    echo ""
+    echo "  (Извънреден случай: SKIP_MAIN_GUARD=1 git commit ... или git commit --no-verify)"
+    exit 1
+fi
+
+exit 0

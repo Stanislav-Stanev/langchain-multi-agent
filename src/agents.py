@@ -15,11 +15,18 @@
 Използваме create_agent от LangChain - готова имплементация на
 "ReAct" цикъла: моделът мисли -> вика инструмент -> получава резултат ->
 мисли пак -> ... -> дава финален отговор.
+
+Двуезичност: промптовете съществуват на български И на английски -
+езикът на промпта определя и езика, на който агентът отговаря.
+Версията се избира с APP_LANG при СЪЗДАВАНЕТО на агента (в
+build_graph), затова смяна на езика изисква ново извикване на
+build_graph() - точно както при смяната на LLM доставчика.
 """
 
 from langchain.agents import create_agent
 
 from src.config import get_llm
+from src.i18n import get_lang
 from src.tools import (
     check_code_syntax,
     get_coding_standards,
@@ -34,7 +41,8 @@ from src.tools import (
 # Добра практика: казваме му ясно КАКВО прави и КАКВО НЕ прави,
 # за да не се опитва да върши чужда работа.
 
-ANALYST_PROMPT = """Ти си бизнес анализатор (Analyst) в софтуерен екип.
+ANALYST_PROMPTS = {
+    "bg": """Ти си бизнес анализатор (Analyst) в софтуерен екип.
 
 Твоята задача е да анализираш изискванията по дадена задача:
 1. Ако е споменат номер на тикет (напр. DEV-101), ВИНАГИ извлечи
@@ -45,7 +53,20 @@ ANALYST_PROMPT = """Ти си бизнес анализатор (Analyst) в с�
 Правила:
 - НЕ пиши код - това е работа на Developer агента.
 - НЕ тествай нищо - това е работа на QA агента.
-- Ако тикетът не съществува, докладвай това ясно."""
+- Ако тикетът не съществува, докладвай това ясно.""",
+    "en": """You are a business Analyst in a software team.
+
+Your job is to analyze the requirements of a given task:
+1. If a ticket number is mentioned (e.g. DEV-101), ALWAYS fetch its
+   details with the get_ticket_details tool.
+2. Summarize the requirements as a short, clear technical specification:
+   what the function must do, inputs, outputs, edge cases.
+
+Rules:
+- Do NOT write code - that is the Developer agent's job.
+- Do NOT test anything - that is the QA agent's job.
+- If the ticket does not exist, report that clearly.""",
+}
 
 
 def create_analyst():
@@ -53,7 +74,7 @@ def create_analyst():
     return create_agent(
         model=get_llm(),
         tools=[get_ticket_details],
-        system_prompt=ANALYST_PROMPT,
+        system_prompt=ANALYST_PROMPTS[get_lang()],
     )
 
 
@@ -61,7 +82,8 @@ def create_analyst():
 # 2. Developer агент - фаза "Имплементация"
 # ---------------------------------------------------------------------------
 
-DEVELOPER_PROMPT = """Ти си софтуерен разработчик (Developer) в екипа.
+DEVELOPER_PROMPTS = {
+    "bg": """Ти си софтуерен разработчик (Developer) в екипа.
 
 Твоята задача е да напишеш Python код по спецификацията, изготвена
 от Analyst агента по-рано в разговора.
@@ -75,7 +97,24 @@ DEVELOPER_PROMPT = """Ти си софтуерен разработчик (Devel
 Правила:
 - Пиши чист, четим код с docstring и типови анотации.
 - Покрий граничните случаи от спецификацията.
-- НЕ прави финален QA преглед - това е работа на QA агента."""
+- НЕ прави финален QA преглед - това е работа на QA агента.""",
+    "en": """You are a software Developer on the team.
+
+Your job is to write Python code following the specification produced
+by the Analyst agent earlier in the conversation.
+
+Workflow:
+1. First check the company coding standards with get_coding_standards
+   (topics: 'python' and 'naming').
+2. Write the code so it covers ALL acceptance criteria.
+3. Return the code in a markdown block ```python ... ``` with a short
+   explanation.
+
+Rules:
+- Write clean, readable code with docstrings and type annotations.
+- Cover the edge cases from the specification.
+- Do NOT do the final QA review - that is the QA agent's job.""",
+}
 
 
 def create_developer():
@@ -83,7 +122,7 @@ def create_developer():
     return create_agent(
         model=get_llm(),
         tools=[get_coding_standards],
-        system_prompt=DEVELOPER_PROMPT,
+        system_prompt=DEVELOPER_PROMPTS[get_lang()],
     )
 
 
@@ -91,7 +130,8 @@ def create_developer():
 # 3. QA агент - фаза "Тестване и преглед"
 # ---------------------------------------------------------------------------
 
-QA_PROMPT = """Ти си QA инженер (Quality Assurance) в екипа.
+QA_PROMPTS = {
+    "bg": """Ти си QA инженер (Quality Assurance) в екипа.
 
 Твоята задача е да провериш кода, написан от Developer агента
 по-рано в разговора, спрямо изискванията от Analyst агента.
@@ -108,7 +148,27 @@ QA_PROMPT = """Ти си QA инженер (Quality Assurance) в екипа.
 
 Правила:
 - Бъди конкретен: цитирай точния критерий, който не е покрит.
-- НЕ пренаписвай кода сам - само докладвай проблемите."""
+- НЕ пренаписвай кода сам - само докладвай проблемите.""",
+    "en": """You are a QA (Quality Assurance) engineer on the team.
+
+Your job is to verify the code written by the Developer agent earlier
+in the conversation against the requirements from the Analyst agent.
+
+Workflow:
+1. Extract the code from the conversation and check it with
+   check_code_syntax.
+2. Run run_test_checklist with the code and a summary of the requirements.
+3. Manually review whether the code covers every acceptance criterion.
+
+Final report (always in this format):
+- Status: APPROVED or NEEDS_WORK
+- Check results
+- List of issues, if any
+
+Rules:
+- Be specific: quote the exact criterion that is not covered.
+- Do NOT rewrite the code yourself - only report the problems.""",
+}
 
 
 def create_qa():
@@ -116,5 +176,5 @@ def create_qa():
     return create_agent(
         model=get_llm(),
         tools=[check_code_syntax, run_test_checklist],
-        system_prompt=QA_PROMPT,
+        system_prompt=QA_PROMPTS[get_lang()],
     )

@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A Bulgarian-language **teaching project**: a multi-agent SDLC system (Supervisor + Analyst + Developer + QA) built on LangChain 1.x + LangGraph 1.x. All code comments, docstrings, prompts, and console output are in Bulgarian and deliberately verbose/explanatory — keep that style when editing. There are no tests and no linter.
+A Bulgarian-language **teaching project**: a multi-agent SDLC system (Supervisor + Analyst + Developer + QA) built on LangChain 1.x + LangGraph 1.x. Code comments and docstrings are in Bulgarian and deliberately verbose/explanatory — keep that style when editing. There are no tests and no linter.
+
+**Bilingual (bg/en):** all user-facing strings live in `src/i18n.py` (`t("key")`, language from `APP_LANG` env, `bg` default) — never add user-facing literals directly in `main.py`/`app.py`; add a key to `STRINGS` with **both** languages (import-time validation fails on half-translated keys). Agent prompts (`agents.py`, `graph.py`) and mock tool data (`tools.py`) are per-language dicts. Prompts are fixed at `build_graph()` time (language is part of the Streamlit graph cache key); tool texts resolve at call time. Docs are mirrored: `README.md` (bg) ↔ `README.en.md` (en) — edits to one must be mirrored in the other. Code comments stay Bulgarian-only by design.
 
 ## Commands
 
@@ -40,7 +42,7 @@ Release notes live in `CHANGELOG.md` (Keep a Changelog format, Bulgarian). Compl
 
 ## Git hooks
 
-`.githooks/pre-push` also runs `claude -p` (headless) before every push to check whether the commits being pushed made CLAUDE.md / README.md / requirements.txt / CHANGELOG.md inaccurate. If so, it creates a separate `docs-sync:` commit and **aborts the push with exit 1** — the user re-runs `git push`, which passes immediately (a `docs-sync:` HEAD skips the check). Opt-in via `git config core.hooksPath .githooks`. Skip with `git push --no-verify` (all hooks) or `SKIP_DOCS_UPDATE=1 git push` (docs sync only). It also no-ops when the pushed commits touch only the doc files, when the doc files have uncommitted changes (never commits someone's WIP), and guards against nested invocation via `CLAUDE_DOCS_HOOK_RUNNING`.
+`.githooks/pre-push` also runs `claude -p` (headless) before every push to check whether the commits being pushed made CLAUDE.md / README.md / README.en.md / requirements.txt / CHANGELOG.md inaccurate, that the two READMEs stay mirrored, and that new user-facing strings have both bg+en versions in `src/i18n.py`. If so, it creates a separate `docs-sync:` commit and **aborts the push with exit 1** — the user re-runs `git push`, which passes immediately (a `docs-sync:` HEAD skips the check). Opt-in via `git config core.hooksPath .githooks`. Skip with `git push --no-verify` (all hooks) or `SKIP_DOCS_UPDATE=1 git push` (docs sync only). It also no-ops when the pushed commits touch only the doc files, when the doc files have uncommitted changes (never commits someone's WIP), and guards against nested invocation via `CLAUDE_DOCS_HOOK_RUNNING`.
 
 ## Architecture
 

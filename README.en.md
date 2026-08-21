@@ -130,9 +130,12 @@ Two hooks live in `.githooks/`:
 - **pre-commit** — blocks direct commits on `main`.
 - **pre-push** — blocks direct pushes to `main` and runs **Claude Code
   headless** (`claude -p`): it reviews all commits about to be pushed
-  and, if they made CLAUDE.md, README.md, requirements.txt or
-  CHANGELOG.md inaccurate, updates them in a **separate docs-sync
+  and, if they made CLAUDE.md, README.md, README.en.md, requirements.txt
+  or CHANGELOG.md inaccurate, updates them in a **separate docs-sync
   commit** (adding a release-notes entry for completed functionality).
+  It also watches the bilingual invariants: the two READMEs must stay
+  mirrored, and new user-facing texts must have both bg AND en versions
+  in `src/i18n.py`.
   The push is then aborted with a clear message — run `git push` again
   and it passes immediately. The check runs once per series of commits,
   and the remote always receives up-to-date documentation.

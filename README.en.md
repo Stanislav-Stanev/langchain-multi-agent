@@ -1,10 +1,10 @@
 🇧🇬 [Български](README.md) | 🇬🇧 **English**
 
-# Multi-Agent SDLC System with LangChain + LangGraph
+# Multi-Bot — a Multi-Agent SDLC System with LangChain + LangGraph
 
-A teaching project: a multi-agent system that automates part of the
-**SDLC process** (Software Development Life Cycle) — from a requirement
-in a ticket to reviewed and approved code.
+A teaching project: **Multi-Bot** is a multi-agent system that automates
+part of the **SDLC process** (Software Development Life Cycle) — from a
+requirement in a ticket to reviewed and approved code.
 
 > The interface, console output, and agents are bilingual: set
 > `APP_LANG=bg|en` in `.env` (or use the language switch in the web UI).

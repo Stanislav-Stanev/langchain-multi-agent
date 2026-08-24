@@ -1,5 +1,5 @@
 """
-Работните агенти (workers) на SDLC системата.
+Работните агенти (workers) на Multi-Bot.
 
 Всеки агент покрива една фаза от Software Development Life Cycle:
 

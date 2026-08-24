@@ -10,3 +10,6 @@ venv/
 
 # Pytest cache
 .pytest_cache/
+
+# Coverage данни (pytest-cov)
+.coverage

@@ -157,9 +157,25 @@ class TestGraphStructure:
         # build_graph() трябва да е поискал точно SupervisorDecision
         assert supervisor.requested_schema is SupervisorDecision
 
-    def test_module_level_graph_exists(self):
-        # Контракт към langgraph.json / LangGraph Studio
+    def test_no_llm_objects_at_module_level(self):
+        # Контракт: src.graph НЯМА LLM-зависим код на ниво модул -
+        # импортът минава без какъвто и да е API ключ (build_graph()
+        # е единственото място, което създава LLM клиенти и агенти).
+        # Проверяваме статично (ast), без да изпълняваме нищо.
+        import ast as ast_module
+        import inspect
+
         import src.graph as graph_module
 
-        assert hasattr(graph_module, "graph")
-        assert hasattr(graph_module.graph, "invoke")
+        tree = ast_module.parse(inspect.getsource(graph_module))
+        forbidden = {"build_graph", "get_llm", "create_analyst", "create_developer", "create_qa"}
+        module_level_calls = {
+            node.value.func.id
+            for node in tree.body
+            if isinstance(node, (ast_module.Assign, ast_module.Expr))
+            and isinstance(node.value, ast_module.Call)
+            and isinstance(node.value.func, ast_module.Name)
+        }
+        assert not (module_level_calls & forbidden), (
+            f"LLM-зависими извиквания на ниво модул: {module_level_calls & forbidden}"
+        )

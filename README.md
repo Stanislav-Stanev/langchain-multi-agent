@@ -39,7 +39,7 @@ Supervisor връща задачата на Developer — т.е. система�
 langchain-multi-agent/
 ├── main.py              # входна точка — стартира графа (конзола)
 ├── app.py               # Streamlit уеб UI с визуализация на живо
-├── langgraph.json       # конфигурация за LangGraph Studio
+├── draw_graph.py        # Mermaid диаграма на графа (локално, без LLM)
 ├── requirements.txt     # зависимости
 ├── pytest.ini           # конфигурация на pytest (тестовете в tests/)
 ├── .env.example         # шаблон за настройките (копирай като .env)

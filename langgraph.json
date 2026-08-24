@@ -1,7 +1,0 @@
-{
-  "dependencies": ["."],
-  "graphs": {
-    "multi_bot": "./src/graph.py:graph"
-  },
-  "env": ".env"
-}

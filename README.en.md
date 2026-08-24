@@ -44,7 +44,7 @@ has a rework loop, just like a real team.
 langchain-multi-agent/
 ├── main.py              # entry point — runs the graph (console)
 ├── app.py               # Streamlit web UI with live visualization
-├── langgraph.json       # LangGraph Studio configuration
+├── draw_graph.py        # Mermaid diagram of the graph (local, no LLM)
 ├── requirements.txt     # dependencies
 ├── pytest.ini           # pytest configuration (the tests in tests/)
 ├── .env.example         # settings template (copy as .env)

@@ -253,8 +253,3 @@ def build_graph():
 
     # compile() превръща описанието в изпълним обект с .invoke()/.stream()
     return builder.compile()
-
-
-# Готов инстанциран граф на ниво модул - това е "входната точка", която
-# LangGraph Studio очаква (виж langgraph.json: "./src/graph.py:graph").
-graph = build_graph()

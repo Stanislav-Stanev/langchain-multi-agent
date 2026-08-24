@@ -16,14 +16,6 @@
 скриптирани отговори. Така тестовете са бързи, безплатни и стабилни.
 """
 
-import os
-
-# ВАЖНО: задаваме dummy ключ ПРЕДИ първия импорт на src.* - модулът
-# src/graph.py строи графа на ниво модул (за LangGraph Studio) и без
-# ключ импортът би гръмнал с RuntimeError. setdefault НЕ презаписва
-# истински ключ, ако вече е зареден от средата/.env.
-os.environ.setdefault("ANTHROPIC_API_KEY", "test-dummy-key")
-
 import pytest
 from langchain_core.messages import AIMessage
 

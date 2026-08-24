@@ -24,6 +24,10 @@
   Pull Request.
 - `CHANGELOG.md` (този файл) — release notes за всяка завършена
   функционалност, поддържан автоматично от pre-push hook-а.
+- Пълен pytest пакет (`tests/`, 97 теста) — покрива целия workflow без
+  реални LLM извиквания: unit, интеграционни и E2E тестове (happy path,
+  rework цикъл при `NEEDS_WORK`, `recursion_limit`, streaming контракт,
+  двуезични промптове). Стартиране: `python -m pytest`.
 
 ## [0.1.0] - 2026-08-21
 

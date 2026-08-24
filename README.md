@@ -41,6 +41,7 @@ langchain-multi-agent/
 ├── app.py               # Streamlit уеб UI с визуализация на живо
 ├── langgraph.json       # конфигурация за LangGraph Studio
 ├── requirements.txt     # зависимости
+├── pytest.ini           # конфигурация на pytest (тестовете в tests/)
 ├── .env.example         # шаблон за настройките (копирай като .env)
 ├── CHANGELOG.md         # release notes (Keep a Changelog)
 ├── README.en.md         # английско огледало на този файл

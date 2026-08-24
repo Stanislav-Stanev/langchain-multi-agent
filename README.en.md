@@ -46,6 +46,7 @@ langchain-multi-agent/
 ├── app.py               # Streamlit web UI with live visualization
 ├── langgraph.json       # LangGraph Studio configuration
 ├── requirements.txt     # dependencies
+├── pytest.ini           # pytest configuration (the tests in tests/)
 ├── .env.example         # settings template (copy as .env)
 ├── CHANGELOG.md         # release notes (Keep a Changelog)
 ├── README.en.md         # this file — English mirror of README.md

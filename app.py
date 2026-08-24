@@ -22,7 +22,12 @@ from dotenv import dotenv_values, load_dotenv
 from langchain_core.callbacks import UsageMetadataCallbackHandler
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from src.config import estimate_cost_usd
+from src.config import (
+    budget_exceeded,
+    estimate_cost_usd,
+    run_budget_usd,
+    total_cost_usd,
+)
 from src.graph import build_graph, extract_text
 from src.i18n import SUPPORTED_LANGS, t
 
@@ -110,6 +115,9 @@ def render_event(e: dict) -> None:
     kind = e["kind"]
     if kind == "supervisor":
         st.info(t("ui_step_supervisor", n=e["step"], next=e["next"].upper(), reason=e["reason"]))
+    elif kind == "route":
+        # Детерминистичен преход (DoD / rework / одобрение) - само причината
+        st.caption(f"🧭 {e['reason']}")
     elif kind == "final":
         icon = ICONS.get(e["agent"], "🤖")
         with st.chat_message("assistant"):
@@ -150,6 +158,7 @@ if run:
     route: list[str] = []
     tool_calls_count = 0
     step_no = 0
+    final_status = ""
     t0 = time.time()
 
     # Callback-ът улавя usage_metadata от ВСЯКО LLM извикване в графа
@@ -177,6 +186,7 @@ if run:
                 # --- Събитие от главния граф ------------------------------
                 for node_name, update in step.items():
                     step_no += 1
+                    final_status = update.get("final_status") or final_status
                     if node_name == "supervisor":
                         nxt = update["next"]
                         route.append(nxt)
@@ -188,14 +198,33 @@ if run:
                         })
                         if nxt != "FINISH":
                             tick(t("ui_status_working", icon=ICONS.get(nxt, "🤖"), agent=nxt.upper()))
-                    elif update.get("messages"):
-                        emit({
-                            "kind": "final",
-                            "step": step_no,
-                            "agent": node_name,
-                            "text": extract_text(update["messages"][-1].content),
-                        })
-                        tick(t("ui_status_supervisor_next"))
+                    else:
+                        if update.get("messages"):
+                            emit({
+                                "kind": "final",
+                                "step": step_no,
+                                "agent": node_name,
+                                "text": extract_text(update["messages"][-1].content),
+                            })
+                        # Детерминистичният преход на възела (DoD, rework,
+                        # одобрение) - показваме причината като route събитие.
+                        if update.get("next"):
+                            route.append(update["next"])
+                            emit({"kind": "route", "reason": update.get("reason", "")})
+                            nxt = update["next"]
+                            if nxt != "FINISH":
+                                tick(t("ui_status_working", icon=ICONS.get(nxt, "🤖"), agent=nxt.upper()))
+
+                # Бюджетна спирачка (improvement.md §5.3)
+                if budget_exceeded(usage_cb.usage_metadata):
+                    spent = total_cost_usd(usage_cb.usage_metadata)
+                    emit({"kind": "error", "text": t(
+                        "budget_stop",
+                        limit=f"{run_budget_usd():.2f}",
+                        spent=f"{spent:.4f}",
+                    )})
+                    final_status = "BUDGET_EXCEEDED"
+                    break
             else:
                 # --- Събитие отвътре в агент (ReAct цикъл) ----------------
                 worker = namespace[0].split(":")[0]
@@ -244,17 +273,17 @@ if run:
         elif total_cost > 0:
             token_lines.append(t("ui_total_cost", cost=f"{total_cost:.4f}"))
 
-        emit({
-            "kind": "summary",
-            "text": t(
-                "ui_summary",
-                route="START → " + " → ".join(route),
-                steps=step_no,
-                tools=tool_calls_count,
-                sec=int(time.time() - t0),
-                token_lines="\n\n".join(token_lines),
-            ),
-        })
+        summary_text = t(
+            "ui_summary",
+            route="START → " + " → ".join(route),
+            steps=step_no,
+            tools=tool_calls_count,
+            sec=int(time.time() - t0),
+            token_lines="\n\n".join(token_lines),
+        )
+        if final_status:
+            summary_text = t("final_status_line", status=final_status) + "\n\n" + summary_text
+        emit({"kind": "summary", "text": summary_text})
     except Exception as exc:  # показваме грешката в UI-я, не само в терминала
         status.update(label=t("ui_status_error"), state="error")
         emit({"kind": "error", "text": t("ui_error", error=exc)})

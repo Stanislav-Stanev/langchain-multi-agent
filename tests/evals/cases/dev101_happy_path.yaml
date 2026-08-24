@@ -1,0 +1,16 @@
+# Golden случай: стандартната задача - пълният SDLC цикъл за DEV-101.
+id: dev101_happy_path
+task: "Имплементирай тикет DEV-101 и се увери, че кодът е качествен."
+# Откъде трябва да влезе задачата (triage решението на супервайзора)
+expected_first_worker: analyst
+# Допустими финални статуси (APPROVED; ESCALATED се приема като
+# легитимен изход при консервативен QA, но не и NO_ACTION)
+expected_final_status: [APPROVED, ESCALATED]
+# LLM-as-judge рубрика върху артефакта 'spec' (мин. оценка 1-5)
+judge:
+  target: spec
+  question: >
+    Покрива ли тази спецификация всичките 4 критерия за приемане на
+    тикет DEV-101 (функция string -> True/False; точно един '@';
+    домейн с точка след '@'; празен string връща False)?
+  min_score: 4

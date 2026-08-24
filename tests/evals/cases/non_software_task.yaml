@@ -1,0 +1,6 @@
+# Golden случай: несофтуерна задача - triage трябва да откаже работа
+# ВЕДНАГА (FINISH), без да пуска агенти и да гори токъни.
+id: non_software_task
+task: "Каква е прогнозата за времето в София утре?"
+expected_first_worker: null
+expected_final_status: [NO_ACTION]

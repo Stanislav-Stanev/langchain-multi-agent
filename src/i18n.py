@@ -51,6 +51,74 @@ STRINGS = {
     },
     "task_label": {"bg": "Задача", "en": "Task"},
 
+    # --- Детерминистичен routing и Definition of Done ----------------------
+    # Тези текстове ги произвежда самият граф (src/graph.py) като 'reason'
+    # на детерминистичните преходи - езикът се решава при извикване.
+    "route_spec_ready": {
+        "bg": "Спецификацията е готова - следва Developer.",
+        "en": "The specification is ready - Developer is next.",
+    },
+    "route_code_ready": {
+        "bg": "Кодът е готов и синтактично валиден - следва QA.",
+        "en": "The code is ready and syntactically valid - QA is next.",
+    },
+    "route_qa_approved": {
+        "bg": "QA одобри кода - задачата е завършена.",
+        "en": "QA approved the code - the task is complete.",
+    },
+    "route_qa_needs_work": {
+        "bg": "QA върна забележки (поправка {n}/{max}) - обратно към Developer.",
+        "en": "QA returned issues (rework {n}/{max}) - back to Developer.",
+    },
+    "route_rework_limit": {
+        "bg": "Лимитът от {max} поправки е изчерпан - ескалация към човек.",
+        "en": "The limit of {max} rework cycles is exhausted - escalating to a human.",
+    },
+    "route_dod_retry": {
+        "bg": "{agent} не покри Definition of Done ({problem}) - един повторен опит.",
+        "en": "{agent} did not meet the Definition of Done ({problem}) - one retry.",
+    },
+    "route_dod_failed": {
+        "bg": "{agent} не покри Definition of Done и след повторния опит - ескалация към човек.",
+        "en": "{agent} did not meet the Definition of Done even after the retry - escalating to a human.",
+    },
+    "dod_missing_spec": {
+        "bg": "празна спецификация",
+        "en": "empty specification",
+    },
+    "dod_missing_code": {
+        "bg": "липсва ```python блок с код",
+        "en": "missing ```python code block",
+    },
+    "dod_syntax_error": {
+        "bg": "синтактична грешка: {error}",
+        "en": "syntax error: {error}",
+    },
+    "dod_fix_request": {
+        "bg": (
+            "Резултатът ти не покри Definition of Done на фазата: {problem}. "
+            "Поправи проблема и върни ПЪЛНИЯ резултат отново."
+        ),
+        "en": (
+            "Your result did not meet the phase's Definition of Done: {problem}. "
+            "Fix the problem and return the FULL result again."
+        ),
+    },
+    "final_status_line": {
+        "bg": "Финален статус: {status}",
+        "en": "Final status: {status}",
+    },
+    "budget_stop": {
+        "bg": (
+            "СТОП: бюджетът за изпълнение (~${limit}) е надвишен "
+            "(изразходвано ~${spent}) - изпълнението е прекратено."
+        ),
+        "en": (
+            "STOP: the run budget (~${limit}) has been exceeded "
+            "(~${spent} spent) - the run was aborted."
+        ),
+    },
+
     # --- Стъпки на изпълнението ------------------------------------------
     "step_supervisor": {
         "bg": "СТЪПКА {n} | SUPERVISOR решава: -> {next}",

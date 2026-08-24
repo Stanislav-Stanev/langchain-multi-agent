@@ -35,6 +35,32 @@ tracing за продукция.
 (§4), операции и разходи (§5), бизнес/SDLC процес (§6) и приоритизирана
 пътна карта (§7).
 
+## 1.1 Статус на изпълнението
+
+**Имплементирано** (Фаза 1 + локално изпълнимите части от Фаза 2):
+
+- ✅ §2.1 Типизирано състояние (`spec`/`code`/`qa_verdict`/`rework_count`/
+  `final_status`) + `QAVerdict` + детерминистичен routing; супервайзорът
+  е само еднократен triage
+- ✅ §2.4 Rework лимит (`MAX_REWORK`, ескалация вместо вечен цикъл)
+- ✅ §2.5 Model routing по роля (`MODEL_<РОЛЯ>` / `OLLAMA_MODEL_<РОЛЯ>`)
+- ✅ §2.7 Retry + timeout на LLM клиентите (`LLM_MAX_RETRIES`,
+  `LLM_TIMEOUT_SECONDS`); fallback верига - предстои
+- ✅ §3.1 CI (`.github/workflows/ci.yml`: ruff + pytest + 85% coverage
+  gate) + `ruff.toml`; branch protection се включва от GitHub настройките
+- ✅ §3.2 Eval suite скелет: golden dataset (`tests/evals/cases/*.yaml`),
+  pytest runner с маркер `eval`, LLM-as-judge през `get_llm()`
+- ✅ §5.1 Pinned зависимости (`requirements.txt` с `==`)
+- ✅ §5.3 Бюджетен лимит per run (`MAX_COST_USD_PER_RUN`, проверка в
+  main.py/app.py след всяка стъпка)
+- ✅ §6.1 Definition of Done по фаза, проверяван от кода (един повторен
+  опит, после ескалация)
+
+**Предстои** (изисква инфраструктурни решения): §2.2 checkpointer
+(Postgres), §2.3 human-in-the-loop, §2.6 реални инструменти (Jira MCP,
+sandbox), §2.8 компресия на контекста, §3.4 Langfuse tracing, §4.1-4.3,
+§5.1 Docker/deploy, §5.2 prompt registry, §6.2-6.4, mypy в CI.
+
 ---
 
 ## 2. Архитектурни подобрения

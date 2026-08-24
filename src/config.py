@@ -23,6 +23,14 @@ load_dotenv()
 MODEL_NAME = os.getenv("MODEL_NAME", "claude-opus-5")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:8b")
 
+# Ролите в системата - всяка може да получи СОБСТВЕН модел (model routing):
+# супервайзорът взима тривиално routing решение и не се нуждае от най-силния
+# (и най-скъп) модел, докато Developer върши най-тежката когнитивна работа.
+# Override: MODEL_SUPERVISOR / MODEL_ANALYST / MODEL_DEVELOPER / MODEL_QA
+# (за Ollama: OLLAMA_MODEL_SUPERVISOR и т.н.). Без override всички роли
+# ползват общия MODEL_NAME / OLLAMA_MODEL.
+LLM_ROLES = ("supervisor", "analyst", "developer", "qa")
+
 # Цени в USD за 1 милион токъна (вход, изход) - Claude API, август 2026.
 # Източник: https://claude.com/pricing (цените се променят - проверявай!)
 MODEL_PRICES_USD_PER_MTOK = {
@@ -70,19 +78,28 @@ def estimate_cost_usd(model_name: str, usage: dict) -> float | None:
     )
 
 
-def get_llm():
+def get_llm(role: str = "default"):
     """
-    Създава и връща LLM клиент според избрания доставчик.
+    Създава и връща LLM клиент според избрания доставчик и РОЛЯ.
 
     Изнасяме създаването във функция ("factory"), за да:
       1. Не повтаряме една и съща конфигурация на 4 места.
       2. Можем лесно да сменим модела/доставчика за ЦЯЛАТА система
          от едно място (LLM_PROVIDER в .env, без промяна по кода).
+      3. Всяка роля да може да ползва РАЗЛИЧЕН модел (model routing):
+         get_llm("supervisor") чете MODEL_SUPERVISOR, ако е зададен.
 
-    Четем LLM_PROVIDER при ВСЯКО извикване (не веднъж на import), за да
+    Четем средата при ВСЯКО извикване (не веднъж на import), за да
     може UI-ят (app.py) да превключва доставчика по време на работа.
     """
     provider = os.getenv("LLM_PROVIDER", "anthropic").strip().lower()
+
+    # Устойчивост (виж improvement.md §2.7): всеки клиент получава
+    # timeout (увиснало извикване не бива да виси вечно) и retry с
+    # exponential backoff (вграден в Anthropic SDK-то) за преходни
+    # грешки като 429/529. Стойностите са конфигурируеми от средата.
+    timeout_s = float(os.getenv("LLM_TIMEOUT_SECONDS", "120"))
+    max_retries = int(os.getenv("LLM_MAX_RETRIES", "3"))
 
     if provider == "ollama":
         # Локален модел - без интернет, без API ключ. Изисква пуснат
@@ -91,8 +108,10 @@ def get_llm():
         # когато се ползва само anthropic.
         from langchain_ollama import ChatOllama
 
+        model = os.getenv(f"OLLAMA_MODEL_{role.upper()}", "") or OLLAMA_MODEL
+
         return ChatOllama(
-            model=OLLAMA_MODEL,
+            model=model,
             # num_predict е еквивалентът на max_tokens при Ollama
             num_predict=4096,
         )
@@ -106,14 +125,50 @@ def get_llm():
                 "и попълни ключа си от https://platform.claude.com/"
             )
 
+        model = os.getenv(f"MODEL_{role.upper()}", "") or MODEL_NAME
+
         # Забележка: най-новите Claude модели (Opus 5 и нагоре) не приемат
         # параметъра temperature - поведението се управлява чрез промпта.
         return ChatAnthropic(
-            model=MODEL_NAME,
+            model=model,
             # max_tokens ограничава дължината на отговора (защита от разходи)
             max_tokens=4096,
+            max_retries=max_retries,
+            default_request_timeout=timeout_s,
         )
 
     raise ValueError(
         f"Непознат LLM_PROVIDER: {provider!r}. Валидни: 'anthropic', 'ollama'."
     )
+
+
+# ---------------------------------------------------------------------------
+# Бюджетен контрол на изпълнението (improvement.md §5.3)
+# ---------------------------------------------------------------------------
+# Твърд лимит на разхода за ЕДИН run: визуализациите (main.py/app.py)
+# проверяват натрупаната цена след всяка стъпка от стрийма и прекратяват
+# изпълнението, ако лимитът е надвишен. Проверката е в консуматора (не в
+# графа), защото usage метаданните се събират от callback-а там.
+
+
+def run_budget_usd() -> float:
+    """Лимитът в долари за един run (MAX_COST_USD_PER_RUN). 0 = изключен."""
+    try:
+        return float(os.getenv("MAX_COST_USD_PER_RUN", "0") or 0)
+    except ValueError:
+        return 0.0
+
+
+def total_cost_usd(usage_metadata: dict) -> float:
+    """Общата цена на run-а до момента - сума по всички използвани модели.
+    Модели без известна цена (локални) се броят като $0."""
+    return sum(
+        estimate_cost_usd(model, usage) or 0.0
+        for model, usage in usage_metadata.items()
+    )
+
+
+def budget_exceeded(usage_metadata: dict) -> bool:
+    """True, ако има зададен бюджет и натрупаната цена го надвишава."""
+    budget = run_budget_usd()
+    return budget > 0 and total_cost_usd(usage_metadata) > budget

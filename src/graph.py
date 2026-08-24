@@ -1,34 +1,61 @@
 """
-Графът на Multi-Bot - шаблон "Supervisor" (надзорник).
+Графът на Multi-Bot - шаблон "Supervisor" с детерминистичен SDLC поток.
 
-Как работи архитектурата:
+Как работи архитектурата (след продукционизирането, improvement.md §2.1):
 
                         +--------------+
-        потребител ---> |  SUPERVISOR  | <--- връща се след всеки агент
+        потребител ---> |  SUPERVISOR  |  <- LLM решава САМО входа (triage)
                         +--------------+
-                         /     |      \\
-                        v      v       v
-                  +--------+ +-----------+ +------+
-                  |ANALYST | | DEVELOPER | |  QA  |
-                  +--------+ +-----------+ +------+
+                          |         \\
+                          v          v
+                    +---------+   FINISH (несофтуерна задача)
+                    | ANALYST |
+                    +---------+
+                          | (детерминистично, след DoD проверка)
+                          v
+                    +-----------+
+                    | DEVELOPER | <---+
+                    +-----------+     | NEEDS_WORK (до MAX_REWORK пъти)
+                          |           |
+                          v           |
+                       +------+       |
+                       |  QA  | ------+
+                       +------+
+                          | APPROVED / ESCALATED
+                          v
+                         END
 
-1. Потребителят задава задача (напр. "Имплементирай тикет DEV-101").
-2. SUPERVISOR (самият той LLM) решава кой специалист да работи пръв.
-3. Избраният агент върши своята част и резултатът му се добавя
-   към общата история на разговора (споделеното "състояние").
-4. Управлението се връща на SUPERVISOR, който решава следващата стъпка.
-5. Когато прецени, че задачата е готова, SUPERVISOR връща FINISH
-   и графът приключва.
+Ключовият принцип (improvement.md §2.1): LLM решава САМО това, което
+кодът не може. Супервайзорът (LLM) прави еднократен triage - откъде да
+влезе задачата (или FINISH, ако изобщо не е софтуерна). Всичко след
+това е детерминистичен код:
+
+  - analyst -> developer: щом спецификацията покрива Definition of Done;
+  - developer -> qa: щом кодът е извлечен и синтактично валиден;
+  - qa -> developer/END: по СТРУКТУРИРАНАТА присъда (QAVerdict), не по
+    парсване на свободен текст - "APPROVED" в перифраза не може да
+    подведе маршрутизацията.
+
+Предпазители (improvement.md §2.4, §6.1):
+  - Definition of Done на всяка фаза, проверяван ОТ КОДА: непокрит DoD
+    дава на агента ЕДИН повторен опит с конкретната липса, после ескалира.
+  - MAX_REWORK лимит на цикъла qa -> developer: след изчерпването му
+    задачата ескалира към човек (final_status="ESCALATED") вместо да
+    гори токъни до recursion_limit.
 
 Ключови понятия от LangGraph:
-- State (състояние)  - данните, които "текат" през графа. Тук: списък
-  от съобщения, който всеки възел чете и допълва.
+- State (състояние)  - данните, които "текат" през графа: историята от
+  съобщения + типизираните артефакти (spec, code, qa_verdict...).
 - Node (възел)       - функция, която получава състоянието и връща
   промени по него. Всеки агент е един възел.
-- Edge (ребро)       - преход между възли. "Условно ребро" избира
-  следващия възел според резултата (тук: решението на супервайзора).
+- Edge (ребро)       - преход между възли. Всеки възел записва в 'next'
+  КЪДЕ трябва да продължи изпълнението, а едно общо условно ребро чете
+  'next' и маршрутизира.
 """
 
+import ast
+import os
+import re
 from typing import Literal
 
 from langchain_core.messages import HumanMessage
@@ -37,11 +64,24 @@ from pydantic import BaseModel, Field
 
 from src.agents import create_analyst, create_developer, create_qa
 from src.config import get_llm
-from src.i18n import get_lang
+from src.i18n import get_lang, t
 
 # Имената на работните агенти - изнесени като константа, за да ги
 # ползваме и в промпта, и в routing логиката, без разминаване.
 WORKERS = ["analyst", "developer", "qa"]
+
+# Колко пъти QA може да върне задачата на Developer, преди системата да
+# ескалира към човек. Чете се от средата при всяко решение (не при
+# import), за да е конфигурируемо без рестарт - като LLM_PROVIDER.
+DEFAULT_MAX_REWORK = 3
+
+
+def max_rework() -> int:
+    """Лимитът на поправките (MAX_REWORK от средата, по подразбиране 3)."""
+    try:
+        return int(os.getenv("MAX_REWORK", DEFAULT_MAX_REWORK))
+    except ValueError:
+        return DEFAULT_MAX_REWORK
 
 
 def extract_text(content) -> str:
@@ -62,23 +102,52 @@ def extract_text(content) -> str:
     return content
 
 
+# Регулярен израз за ```python ... ``` блок - кодът артефакт на Developer
+# се извлича оттук, а не от целия свободен текст на отговора.
+_PYTHON_BLOCK_RE = re.compile(r"```python\s*\n(.*?)```", re.DOTALL)
+
+
+def extract_python_code(text: str) -> str:
+    """
+    Извлича Python кода от markdown отговора на Developer агента.
+
+    Взимат се ВСИЧКИ ```python блокове (агентът може да върне функцията
+    и тестовете ѝ отделно). Ако няма нито един блок - връща празен низ,
+    което проваля Definition of Done проверката и връща задачата на
+    Developer с конкретно указание.
+    """
+    blocks = _PYTHON_BLOCK_RE.findall(text or "")
+    return "\n\n".join(block.strip() for block in blocks).strip()
+
+
 # ---------------------------------------------------------------------------
-# Структурирано решение на супервайзора
+# Структурирани решения - никакво парсване на свободен текст
 # ---------------------------------------------------------------------------
-# Вместо да парсваме свободен текст ("мисля, че Analyst трябва..."),
-# караме модела да върне СТРОГО структуриран отговор по тази Pydantic
-# схема. Това е ключова добра практика: routing-ът става надежден,
-# защото "next" може да е САМО една от изброените стойности.
+# Както решението на супервайзора, така и присъдата на QA са Pydantic
+# схеми: моделът е ПРИНУДЕН да върне една от изброените стойности.
+# Това е гръбнакът на надеждния routing (improvement.md §2.1).
 
 
 class SupervisorDecision(BaseModel):
-    """Решение на супервайзора: кой работи следващ или край."""
+    """Triage решение на супервайзора: откъде влиза задачата (или FINISH)."""
 
     next: Literal["analyst", "developer", "qa", "FINISH"] = Field(
-        description="Следващият агент, който да поеме работата, или FINISH при готова задача."
+        description="Агентът, от който да започне работата, или FINISH ако задачата не е софтуерна."
     )
     reason: str = Field(
-        description="Кратко обяснение (1 изречение) защо е избран този агент."
+        description="Кратко обяснение (1 изречение) защо е избран този вход."
+    )
+
+
+class QAVerdict(BaseModel):
+    """Структурираната присъда на QA - routing-ът чете НЕЯ, не текста."""
+
+    status: Literal["APPROVED", "NEEDS_WORK"] = Field(
+        description="APPROVED ако кодът покрива всички критерии, иначе NEEDS_WORK."
+    )
+    issues: list[str] = Field(
+        default_factory=list,
+        description="Конкретните забележки (празен списък при APPROVED).",
     )
 
 
@@ -88,40 +157,136 @@ SUPERVISOR_PROMPTS = {
     "bg": """Ти си Team Lead (супервайзор) на софтуерен екип от агенти.
 
 Твоят екип (типичен SDLC процес):
-- analyst:   анализира изисквания и тикети, пише спецификация. Работи ПЪРВИ.
-- developer: пише Python код по спецификацията на analyst.
-- qa:        проверява кода на developer спрямо изискванията.
+- analyst:   анализира изисквания и тикети, пише спецификация.
+- developer: пише Python код по спецификация.
+- qa:        проверява код спрямо изисквания.
 
-Твоята задача: според историята на разговора реши КОЙ агент да работи
-следващ. Стандартният поток е analyst -> developer -> qa -> FINISH.
+Твоята задача е ЕДНОКРАТЕН triage: реши ОТКЪДЕ да влезе задачата.
+След твоето решение потокът е автоматичен: analyst -> developer -> qa.
 
 Правила:
-- Не пропускай фази: не пускай developer без спецификация от analyst,
-  не пускай qa без код от developer.
-- Ако qa върне NEEDS_WORK, върни задачата на developer за поправка.
-- Когато qa одобри кода (APPROVED), избери FINISH.
-- Ако задачата изобщо не е софтуерна, избери FINISH веднага.
+- Нова задача/тикет без готова спецификация -> analyst (стандартният случай).
+- Задачата съдържа готова спецификация, но не и код -> developer.
+- Задачата съдържа готов код, който само трябва да се провери -> qa.
+- Задачата изобщо не е софтуерна -> FINISH.
 
 Отговори само със структурираното решение.""",
     "en": """You are the Team Lead (supervisor) of a team of software agents.
 
 Your team (a typical SDLC process):
-- analyst:   analyzes requirements and tickets, writes a specification. Works FIRST.
-- developer: writes Python code following the analyst's specification.
-- qa:        verifies the developer's code against the requirements.
+- analyst:   analyzes requirements and tickets, writes a specification.
+- developer: writes Python code from a specification.
+- qa:        verifies code against requirements.
 
-Your job: based on the conversation history, decide WHICH agent works
-next. The standard flow is analyst -> developer -> qa -> FINISH.
+Your job is a ONE-TIME triage: decide WHERE the task enters.
+After your decision the flow is automatic: analyst -> developer -> qa.
 
 Rules:
-- Do not skip phases: no developer without a spec from analyst,
-  no qa without code from developer.
-- If qa returns NEEDS_WORK, send the task back to developer for fixes.
-- When qa approves the code (APPROVED), choose FINISH.
-- If the task is not a software task at all, choose FINISH immediately.
+- A new task/ticket without a spec -> analyst (the standard case).
+- The task contains a ready spec but no code -> developer.
+- The task contains ready code that only needs review -> qa.
+- The task is not a software task at all -> FINISH.
 
 Answer only with the structured decision.""",
 }
+
+# Промпт за извличането на структурираната присъда от QA доклада.
+# Отделно (евтино) LLM извикване след ReAct цикъла на QA агента:
+# доклад в свободен текст -> QAVerdict по схема.
+QA_VERDICT_PROMPTS = {
+    "bg": (
+        "По-долу е доклад от QA преглед на код. Извлечи присъдата "
+        "СТРИКТНО по схемата: status е APPROVED само ако докладът ясно "
+        "одобрява кода; при каквито и да е забележки - NEEDS_WORK, а "
+        "issues изброява конкретните проблеми.\n\nДоклад:\n{report}"
+    ),
+    "en": (
+        "Below is a QA code-review report. Extract the verdict STRICTLY "
+        "per the schema: status is APPROVED only if the report clearly "
+        "approves the code; with any issues present - NEEDS_WORK, and "
+        "issues lists the concrete problems.\n\nReport:\n{report}"
+    ),
+}
+
+
+# ---------------------------------------------------------------------------
+# Разширено състояние: MessagesState + типизираните артефакти на процеса
+# ---------------------------------------------------------------------------
+
+
+class TeamState(MessagesState):
+    """Състоянието на графа: историята + артефактите на всяка SDLC фаза.
+
+    Артефактите (spec, code, qa_verdict) са "официалните" резултати на
+    фазите - routing-ът и Definition of Done проверките четат ТЯХ, а не
+    свободния текст в историята (improvement.md §2.1).
+    """
+
+    next: str            # къде продължава изпълнението (чете се от routing)
+    reason: str          # защо - за визуализациите (main.py / app.py)
+    spec: str            # артефакт на Analyst
+    code: str            # артефакт на Developer (извлеченият Python код)
+    qa_verdict: dict     # артефакт на QA (QAVerdict.model_dump())
+    rework_count: int    # колко пъти QA е връщал задачата (лимит: max_rework)
+    dod_retries: dict    # брой повторни опити по агент при непокрит DoD
+    final_status: str    # APPROVED | ESCALATED | NO_ACTION (за отчета)
+
+
+def route_next(state: TeamState) -> str:
+    """
+    Общата routing функция: всеки възел е записал в 'next' къде трябва
+    да продължи изпълнението; 'FINISH' се превежда до END.
+    """
+    if state["next"] == "FINISH":
+        return END
+    return state["next"]
+
+
+# ---------------------------------------------------------------------------
+# Помощници за възлите
+# ---------------------------------------------------------------------------
+
+
+def _run_agent(agent, state: TeamState, name: str) -> tuple[str, HumanMessage]:
+    """
+    Пуска ReAct цикъла на агент върху историята и връща (текст, съобщение).
+
+    Резултатът се "подписва" с името на агента (name=...) и се добавя
+    в общата история като HumanMessage - виж extract_text защо текстът
+    се филтрира от thinking блокове.
+    """
+    result = agent.invoke({"messages": state["messages"]})
+    final_answer = extract_text(result["messages"][-1].content)
+    return final_answer, HumanMessage(content=final_answer, name=name)
+
+
+def _dod_failure(state: TeamState, name: str, problem: str) -> dict:
+    """
+    Обработва непокрит Definition of Done (improvement.md §6.1).
+
+    Първият пропуск дава на агента ЕДИН повторен опит: в историята се
+    добавя конкретно указание какво липсва и изпълнението се връща към
+    същия възел. Втори пропуск ескалира към човек - агент, който два
+    пъти не покрива собствения си DoD, няма да го покрие и на третия,
+    а токъните струват пари.
+    """
+    retries = dict(state.get("dod_retries") or {})
+    attempts = retries.get(name, 0)
+
+    if attempts < 1:
+        retries[name] = attempts + 1
+        return {
+            "messages": [HumanMessage(content=t("dod_fix_request", problem=problem))],
+            "dod_retries": retries,
+            "next": name,  # повторен опит: обратно към същия агент
+            "reason": t("route_dod_retry", agent=name, problem=problem),
+        }
+
+    return {
+        "next": "FINISH",
+        "final_status": "ESCALATED",
+        "reason": t("route_dod_failed", agent=name),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -135,16 +300,15 @@ Answer only with the structured decision.""",
 
 def make_supervisor_node(supervisor_llm):
     """
-    Фабрика за възела-надзорник.
+    Фабрика за възела-надзорник (еднократният triage).
 
-    Възелът чете цялата история и решава следващата стъпка. Връща dict
-    с промени по състоянието: 'next' се чете от routing функцията, а
+    Възелът чете задачата и решава откъде да влезе тя в конвейера.
     'reason' се пази, за да може UI-ят да визуализира ЗАЩО е взето
-    решението. Самата визуализация е в main.py/app.py - графът само
-    произвежда данни (separation of concerns).
+    решението - самата визуализация е в main.py/app.py (separation
+    of concerns: графът само произвежда данни).
     """
 
-    def supervisor_node(state: MessagesState) -> dict:
+    def supervisor_node(state: TeamState) -> dict:
         decision = supervisor_llm.invoke(
             [
                 {"role": "system", "content": SUPERVISOR_PROMPTS[get_lang()]},
@@ -152,64 +316,119 @@ def make_supervisor_node(supervisor_llm):
             ]
         )
 
-        return {"next": decision.next, "reason": decision.reason}
+        update = {"next": decision.next, "reason": decision.reason}
+        if decision.next == "FINISH":
+            # Несофтуерна задача: приключваме без работа по нея.
+            update["final_status"] = "NO_ACTION"
+        return update
 
     return supervisor_node
 
 
-def make_worker_node(agent, name: str):
-    """
-    Фабрика за възли-работници.
+def make_analyst_node(agent):
+    """Analyst: спецификация + DoD проверка, после детерминистично -> developer."""
 
-    Защо фабрика? Тримата работници правят едно и също "опаковане":
-    1. подават цялата история на своя агент;
-    2. взимат финалния му отговор;
-    3. добавят го обратно в общата история, ПОДПИСАН с името на агента
-       (name=...), за да знае супервайзорът кой какво е казал.
-    Вместо да копираме този код 3 пъти, го пишем веднъж.
-    """
+    def analyst_node(state: TeamState) -> dict:
+        spec, message = _run_agent(agent, state, "analyst")
 
-    def worker_node(state: MessagesState) -> dict:
-        # Агентът получава цялата дотукашна история и пуска своя
-        # вътрешен ReAct цикъл (мислене + инструменти).
-        result = agent.invoke({"messages": state["messages"]})
+        # Definition of Done на фазата: спецификацията не е празна.
+        if not spec.strip():
+            failure = _dod_failure(state, "analyst", t("dod_missing_spec"))
+            failure.setdefault("messages", []).insert(0, message)
+            return failure
 
-        # Последното съобщение е финалният отговор на агента -
-        # взимаме само текста му (виж extract_text защо).
-        final_answer = extract_text(result["messages"][-1].content)
-
-        # Връщаме го като ново съобщение в ОБЩАТА история.
-        # MessagesState автоматично ДОБАВЯ (append) новите съобщения,
-        # вместо да замества списъка - това е неговата "магия".
         return {
-            "messages": [HumanMessage(content=final_answer, name=name)]
+            "messages": [message],
+            "spec": spec,
+            "next": "developer",
+            "reason": t("route_spec_ready"),
         }
 
-    return worker_node
+    return analyst_node
 
 
-# ---------------------------------------------------------------------------
-# Разширено състояние: MessagesState + полето 'next' за routing
-# ---------------------------------------------------------------------------
+def make_developer_node(agent):
+    """Developer: код + DoD проверка (извлечен блок, валиден синтаксис) -> qa."""
+
+    def developer_node(state: TeamState) -> dict:
+        answer, message = _run_agent(agent, state, "developer")
+
+        # Definition of Done на фазата, проверяван ОТ КОДА (не от LLM):
+        # 1. отговорът съдържа ```python блок с код;
+        code = extract_python_code(answer)
+        if not code:
+            failure = _dod_failure(state, "developer", t("dod_missing_code"))
+            failure.setdefault("messages", []).insert(0, message)
+            return failure
+
+        # 2. кодът е синтактично валиден (ast.parse НЕ изпълнява кода).
+        try:
+            ast.parse(code)
+        except SyntaxError as exc:
+            failure = _dod_failure(
+                state, "developer", t("dod_syntax_error", error=exc.msg)
+            )
+            failure.setdefault("messages", []).insert(0, message)
+            return failure
+
+        return {
+            "messages": [message],
+            "code": code,
+            "next": "qa",
+            "reason": t("route_code_ready"),
+        }
+
+    return developer_node
 
 
-class TeamState(MessagesState):
-    """Състоянието на графа: историята + решението кой е следващ и защо."""
-
-    next: str
-    reason: str
-
-
-def route_after_supervisor(state: TeamState) -> str:
+def make_qa_node(agent, verdict_llm):
     """
-    Routing функция за условното ребро след супервайзора.
+    QA: преглед + СТРУКТУРИРАНА присъда + детерминистичен routing.
 
-    Чете решението от състоянието и връща името на следващия възел.
-    'FINISH' се превежда до END - специалния краен възел на LangGraph.
+    Двустъпков процес:
+      1. QA агентът (ReAct) прави прегледа и пише доклад в свободен текст.
+      2. Отделно structured-output извикване извлича QAVerdict от доклада.
+    Routing-ът след това е чист код: APPROVED -> END; NEEDS_WORK ->
+    developer, но само до max_rework() пъти - после ескалация към човек
+    (improvement.md §2.4: лимитът е бизнес правило, не recursion_limit).
     """
-    if state["next"] == "FINISH":
-        return END
-    return state["next"]
+
+    def qa_node(state: TeamState) -> dict:
+        report, message = _run_agent(agent, state, "qa")
+
+        verdict = verdict_llm.invoke(
+            QA_VERDICT_PROMPTS[get_lang()].format(report=report)
+        )
+
+        update = {"messages": [message], "qa_verdict": verdict.model_dump()}
+
+        if verdict.status == "APPROVED":
+            update.update(
+                next="FINISH",
+                final_status="APPROVED",
+                reason=t("route_qa_approved"),
+            )
+            return update
+
+        # NEEDS_WORK: връщане към Developer, докато лимитът позволява.
+        rework = state.get("rework_count", 0) + 1
+        limit = max_rework()
+        update["rework_count"] = rework
+
+        if rework > limit:
+            update.update(
+                next="FINISH",
+                final_status="ESCALATED",
+                reason=t("route_rework_limit", max=limit),
+            )
+        else:
+            update.update(
+                next="developer",
+                reason=t("route_qa_needs_work", n=rework, max=limit),
+            )
+        return update
+
+    return qa_node
 
 
 # ---------------------------------------------------------------------------
@@ -221,35 +440,31 @@ def build_graph():
     """
     Сглобява и компилира мултиагентния граф.
 
-    Всичко LLM-зависимо (агенти, супервайзор) се създава ТУК, при всяко
-    извикване - така графът отразява текущия LLM_PROVIDER от средата.
+    Всичко LLM-зависимо (агенти, супервайзор, екстрактор на присъдата)
+    се създава ТУК, при всяко извикване - така графът отразява текущия
+    LLM_PROVIDER (и per-role моделите) от средата.
     """
-    # LLM клиент на супервайзора, "закотвен" към Pydantic схемата:
-    # with_structured_output гарантира, че отговорът ще е SupervisorDecision.
-    supervisor_llm = get_llm().with_structured_output(SupervisorDecision)
+    # LLM клиенти, "закотвени" към Pydantic схемите: with_structured_output
+    # гарантира, че отговорът е точно SupervisorDecision / QAVerdict.
+    supervisor_llm = get_llm("supervisor").with_structured_output(SupervisorDecision)
+    verdict_llm = get_llm("qa").with_structured_output(QAVerdict)
 
     builder = StateGraph(TeamState)
 
     # 1. Регистрираме възлите (име -> функция)
     builder.add_node("supervisor", make_supervisor_node(supervisor_llm))
-    builder.add_node("analyst", make_worker_node(create_analyst(), "analyst"))
-    builder.add_node("developer", make_worker_node(create_developer(), "developer"))
-    builder.add_node("qa", make_worker_node(create_qa(), "qa"))
+    builder.add_node("analyst", make_analyst_node(create_analyst()))
+    builder.add_node("developer", make_developer_node(create_developer()))
+    builder.add_node("qa", make_qa_node(create_qa(), verdict_llm))
 
-    # 2. Входна точка: разговорът винаги започва при супервайзора
+    # 2. Входна точка: еднократният triage на супервайзора
     builder.add_edge(START, "supervisor")
 
-    # 3. Условно ребро: след супервайзора отиваме там, където той реши
-    builder.add_conditional_edges(
-        "supervisor",
-        route_after_supervisor,
-        # Изброяваме възможните дестинации (за яснота и за визуализация)
-        ["analyst", "developer", "qa", END],
-    )
-
-    # 4. След всеки работник управлението се ВРЪЩА на супервайзора
-    for worker in WORKERS:
-        builder.add_edge(worker, "supervisor")
+    # 3. Едно общо условно ребро: ВСЕКИ възел записва в 'next' къде
+    #    продължава изпълнението (triage, детерминистичните преходи,
+    #    DoD повторните опити, rework цикълът) - route_next само го чете.
+    for node in ("supervisor", *WORKERS):
+        builder.add_conditional_edges(node, route_next, [*WORKERS, END])
 
     # compile() превръща описанието в изпълним обект с .invoke()/.stream()
     return builder.compile()

@@ -1,26 +1,42 @@
 # === Основни зависимости за Multi-Bot ===
+#
+# Версиите са PINNED (==) за възпроизводими инсталации и deploy-и
+# (improvement.md §5.1): всяка машина/CI получава ТОЧНО същите пакети.
+# Ъпгрейд = съзнателна промяна тук + зелени тестове, не късмет при
+# поредния 'pip install'.
 
 # LangChain - основната рамка за работа с LLM модели
-langchain>=1.0
+langchain==1.3.15
 
 # Официалната интеграция на Anthropic (Claude) за LangChain
-langchain-anthropic>=1.0
+langchain-anthropic==1.6.0
 
 # LangGraph - библиотека за изграждане на агентни "графи"
 # (състояния, възли, преходи) - това е сърцето на мултиагентните системи
-langgraph>=1.0
+langgraph==1.2.11
 
 # Зареждане на променливи от .env файл (API ключове и др.)
-python-dotenv>=1.0
+python-dotenv==1.2.3
 
 # Pydantic - за валидация на данни и структурирани изходи от LLM
-pydantic>=2.0
+pydantic==2.13.4
 
 # Ollama интеграция - локални модели без интернет (LLM_PROVIDER=ollama)
-langchain-ollama>=1.0
+langchain-ollama==1.1.0
 
 # Streamlit - локален уеб UI за визуализация на workflow-а (app.py)
-streamlit>=1.40
+streamlit==1.62.0
+
+# === Тестове и качество на кода ===
 
 # Pytest - тестовата рамка (tests/ покрива целия workflow без реални LLM извиквания)
-pytest>=8.0
+pytest==9.1.1
+
+# Покритие на кода - CI изисква минимален праг (виж .github/workflows/ci.yml)
+pytest-cov==7.1.0
+
+# Ruff - линтер (конфигурация: ruff.toml)
+ruff==0.16.4
+
+# YAML - golden dataset файловете на eval пакета (tests/evals/cases/)
+pyyaml==6.0.3

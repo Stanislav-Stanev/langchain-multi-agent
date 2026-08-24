@@ -24,7 +24,12 @@ import sys
 from langchain_core.callbacks import UsageMetadataCallbackHandler
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from src.config import estimate_cost_usd
+from src.config import (
+    budget_exceeded,
+    estimate_cost_usd,
+    run_budget_usd,
+    total_cost_usd,
+)
 from src.graph import build_graph, extract_text
 from src.i18n import t
 
@@ -76,8 +81,9 @@ def main() -> None:
     graph = build_graph()
 
     step_no = 0    # пореден номер на стъпка в главния граф (за четимост)
-    route = []     # решенията на супервайзора - за финалното обобщение
+    route = []     # маршрутът през възлите - за финалното обобщение
     tool_calls_count = 0
+    final_status = ""  # APPROVED | ESCALATED | NO_ACTION (от графа)
 
     # Callback-ът улавя usage_metadata от ВСЯКО LLM извикване в графа
     # (вкл. супервайзора) и ги сумира по модел - за отчета накрая.
@@ -105,6 +111,7 @@ def main() -> None:
             # --- Събитие от ГЛАВНИЯ граф ---------------------------------
             for node_name, update in step.items():
                 step_no += 1
+                final_status = update.get("final_status") or final_status
                 if node_name == "supervisor":
                     nxt = update["next"]
                     route.append(nxt)
@@ -113,9 +120,27 @@ def main() -> None:
                     print(t("reason", reason=update["reason"]))
                     if nxt != "FINISH":
                         print(t("handoff", agent=nxt.upper()))
-                elif update.get("messages"):
-                    print("\n" + t("final_answer", n=step_no, agent=node_name.upper()))
-                    print(indent(extract_text(update["messages"][-1].content), "  | "))
+                else:
+                    if update.get("messages"):
+                        print("\n" + t("final_answer", n=step_no, agent=node_name.upper()))
+                        print(indent(extract_text(update["messages"][-1].content), "  | "))
+                    # Детерминистичният преход на възела (следваща стъпка + защо):
+                    # всеки работник записва next/reason в състоянието.
+                    if update.get("next"):
+                        route.append(update["next"])
+                        print(t("reason", reason=update.get("reason", "")))
+
+            # Бюджетна спирачка (improvement.md §5.3): проверяваме
+            # натрупаната цена след всяка стъпка от главния граф.
+            if budget_exceeded(usage_cb.usage_metadata):
+                spent = total_cost_usd(usage_cb.usage_metadata)
+                print("\n" + t(
+                    "budget_stop",
+                    limit=f"{run_budget_usd():.2f}",
+                    spent=f"{spent:.4f}",
+                ))
+                final_status = "BUDGET_EXCEEDED"
+                break
         else:
             # --- Събитие ОТВЪТРЕ в агент (неговият ReAct цикъл) ----------
             # namespace[0] е например "analyst:<uuid>" - взимаме името.
@@ -139,6 +164,8 @@ def main() -> None:
     print(t("summary_title"))
     print(LINE)
     print(t("route", route="START -> " + " -> ".join(route)))
+    if final_status:
+        print(t("final_status_line", status=final_status))
     print(t("steps_line", steps=step_no, tools=tool_calls_count))
     print(t("tokens_title"))
     if usage_cb.usage_metadata:

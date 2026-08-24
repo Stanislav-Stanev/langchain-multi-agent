@@ -21,3 +21,6 @@ langchain-ollama>=1.0
 
 # Streamlit - локален уеб UI за визуализация на workflow-а (app.py)
 streamlit>=1.40
+
+# Pytest - тестовата рамка (tests/ покрива целия workflow без реални LLM извиквания)
+pytest>=8.0

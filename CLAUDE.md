@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-**Multi-Bot** — a Bulgarian-language **teaching project**: a multi-agent SDLC system (Supervisor + Analyst + Developer + QA) built on LangChain 1.x + LangGraph 1.x. "Multi-Bot" is the system's name; use it in all user-facing titles and docs. Code comments and docstrings are in Bulgarian and deliberately verbose/explanatory — keep that style when editing. There are no tests and no linter.
+**Multi-Bot** — a Bulgarian-language **teaching project**: a multi-agent SDLC system (Supervisor + Analyst + Developer + QA) built on LangChain 1.x + LangGraph 1.x. "Multi-Bot" is the system's name; use it in all user-facing titles and docs. Code comments and docstrings are in Bulgarian and deliberately verbose/explanatory — keep that style when editing (tests included). There is no linter.
+
+**Tests:** `tests/` is a pytest suite covering the whole workflow with **zero real LLM calls** — the supervisor and workers are scripted test doubles (see `tests/conftest.py`). Three layers: unit (tools/i18n/config/helpers), integration (real `create_agent` agents + real mock tools driven by a fake tool-calling model), and E2E (the real graph: happy path, `NEEDS_WORK` rework loop, immediate FINISH, `recursion_limit`, streaming contract, bilingual prompts). `conftest.py` sets a dummy `ANTHROPIC_API_KEY` before importing `src.graph` (its module-level `build_graph()` needs one) and an autouse fixture clears `APP_LANG` so every test starts at the `bg` default. Run: `.\.venv\Scripts\python.exe -m pytest`. When changing graph/agents/tools behavior, keep the suite green and extend it.
 
 **Bilingual (bg/en):** all user-facing strings live in `src/i18n.py` (`t("key")`, language from `APP_LANG` env, `bg` default) — never add user-facing literals directly in `main.py`/`app.py`; add a key to `STRINGS` with **both** languages (import-time validation fails on half-translated keys). Agent prompts (`agents.py`, `graph.py`) and mock tool data (`tools.py`) are per-language dicts. Prompts are fixed at `build_graph()` time (language is part of the Streamlit graph cache key); tool texts resolve at call time. Docs are mirrored: `README.md` (bg) ↔ `README.en.md` (en) — edits to one must be mirrored in the other. Code comments stay Bulgarian-only by design.
 
@@ -26,6 +28,9 @@ Windows + PowerShell project. Use the venv executables directly (no activation n
 .\.venv\Scripts\langgraph.exe dev
 # Studio UI must be opened at the EU host (account is EU-region):
 # https://eu.smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024
+
+# Tests (fast, offline — no LLM calls)
+.\.venv\Scripts\python.exe -m pytest
 
 # Offline model (one-time, ~5 GB)
 ollama pull qwen3:8b

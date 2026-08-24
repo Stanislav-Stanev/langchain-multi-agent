@@ -46,18 +46,20 @@ langchain-multi-agent/
 ├── app.py               # Streamlit web UI with live visualization
 ├── langgraph.json       # LangGraph Studio configuration
 ├── requirements.txt     # dependencies
+├── pytest.ini           # pytest configuration (the tests in tests/)
 ├── .env.example         # settings template (copy as .env)
 ├── CHANGELOG.md         # release notes (Keep a Changelog)
 ├── README.en.md         # this file — English mirror of README.md
 ├── .githooks/
 │   ├── pre-commit       # hook: protects main from direct commits
 │   └── pre-push         # hook: protects main + Claude syncs docs/changelog
-└── src/
-    ├── config.py        # settings + LLM client factory (anthropic/ollama)
-    ├── i18n.py          # bilingual texts (bg/en) + t() helper
-    ├── tools.py         # the tools (mock Jira, linter, QA checklist)
-    ├── agents.py        # the three worker agents (ReAct)
-    └── graph.py         # supervisor + LangGraph graph assembly
+├── src/
+│   ├── config.py        # settings + LLM client factory (anthropic/ollama)
+│   ├── i18n.py          # bilingual texts (bg/en) + t() helper
+│   ├── tools.py         # the tools (mock Jira, linter, QA checklist)
+│   ├── agents.py        # the three worker agents (ReAct)
+│   └── graph.py         # supervisor + LangGraph graph assembly
+└── tests/               # pytest suite — the full workflow, no real LLM calls
 ```
 
 Recommended reading order for learning:
@@ -88,6 +90,26 @@ python main.py "Write a function that reverses a string"
 
 # Web UI (language and provider switches in the sidebar)
 streamlit run app.py
+```
+
+## Tests
+
+The project has a pytest suite (`tests/`) covering the full workflow
+**without a single real LLM call** — the supervisor and the workers are
+replaced with scripted test doubles, so the tests are fast, free and
+deterministic:
+
+- **unit tests** — the tools, i18n, config, helper functions;
+- **integration** — the real ReAct agents (`create_agent`) + the real
+  mock tools, driven by a fake tool-calling model;
+- **E2E workflow** — the real graph: the happy path
+  (analyst → developer → qa → FINISH), the `NEEDS_WORK` rework loop,
+  immediate FINISH, the `recursion_limit` guard, the streaming contract
+  and the bilingual prompts.
+
+```bash
+python -m pytest              # the whole suite (~5 s)
+python -m pytest tests/test_workflow_e2e.py -v   # E2E scenarios only
 ```
 
 ## Bilingual support (bg/en)

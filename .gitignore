@@ -9,3 +9,6 @@ venv/
 
 # Локално състояние на LangGraph Studio dev сървъра
 .langgraph_api/
+
+# Pytest cache
+.pytest_cache/

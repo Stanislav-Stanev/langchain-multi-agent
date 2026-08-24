@@ -31,7 +31,7 @@ load_dotenv()
 # Икони на агентите - чисто визуална украса за по-лесно сканиране с очи
 ICONS = {"supervisor": "🧭", "analyst": "📋", "developer": "💻", "qa": "🔎"}
 
-st.set_page_config(page_title="SDLC Multi-Agent", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="Multi-Bot", page_icon="🤖", layout="wide")
 
 
 # ---------------------------------------------------------------------------

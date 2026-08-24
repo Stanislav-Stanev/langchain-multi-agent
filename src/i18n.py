@@ -46,8 +46,8 @@ STRINGS = {
         "en": "Implement ticket DEV-101 and make sure the code is high quality.",
     },
     "app_title": {
-        "bg": "МУЛТИАГЕНТНА SDLC СИСТЕМА (Supervisor + Analyst + Developer + QA)",
-        "en": "MULTI-AGENT SDLC SYSTEM (Supervisor + Analyst + Developer + QA)",
+        "bg": "MULTI-BOT - мултиагентна SDLC система (Supervisor + Analyst + Developer + QA)",
+        "en": "MULTI-BOT - multi-agent SDLC system (Supervisor + Analyst + Developer + QA)",
     },
     "task_label": {"bg": "Задача", "en": "Task"},
 
@@ -108,7 +108,7 @@ STRINGS = {
     },
 
     # --- Streamlit UI ------------------------------------------------------
-    "ui_sidebar_title": {"bg": "🤖 SDLC екип", "en": "🤖 SDLC team"},
+    "ui_sidebar_title": {"bg": "🤖 Multi-Bot", "en": "🤖 Multi-Bot"},
     "ui_sidebar_caption": {
         "bg": "Supervisor + Analyst + Developer + QA (LangGraph)",
         "en": "Supervisor + Analyst + Developer + QA (LangGraph)",
@@ -149,8 +149,8 @@ STRINGS = {
         ),
     },
     "ui_page_title": {
-        "bg": "Мултиагентна SDLC система",
-        "en": "Multi-agent SDLC system",
+        "bg": "Multi-Bot — мултиагентна SDLC система",
+        "en": "Multi-Bot — multi-agent SDLC system",
     },
     "ui_run": {"bg": "▶ Стартирай", "en": "▶ Run"},
     "ui_building_graph": {"bg": "Сглобяване на графа...", "en": "Building the graph..."},

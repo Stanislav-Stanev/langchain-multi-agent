@@ -1,10 +1,10 @@
 🇧🇬 **Български** | 🇬🇧 [English](README.en.md)
 
-# Мултиагентна SDLC система с LangChain + LangGraph
+# Multi-Bot — мултиагентна SDLC система с LangChain + LangGraph
 
-Учебен проект: мултиагентна система, която автоматизира част от **SDLC
-процеса** (Software Development Life Cycle) — от изискване в тикет до
-прегледан и одобрен код.
+Учебен проект: **Multi-Bot** е мултиагентна система, която автоматизира
+част от **SDLC процеса** (Software Development Life Cycle) — от
+изискване в тикет до прегледан и одобрен код.
 
 ## Архитектура — шаблон "Supervisor"
 

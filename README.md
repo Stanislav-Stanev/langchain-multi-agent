@@ -47,12 +47,13 @@ langchain-multi-agent/
 ├── .githooks/
 │   ├── pre-commit       # hook: пази main от директни комити
 │   └── pre-push         # hook: пази main + Claude синхронизира docs/changelog
-└── src/
-    ├── config.py        # настройки + фабрика за LLM клиента (anthropic/ollama)
-    ├── i18n.py          # двуезичните текстове (bg/en) + t() функция
-    ├── tools.py         # инструментите (mock Jira, линтер, QA чеклист)
-    ├── agents.py        # тримата работни агенти (ReAct)
-    └── graph.py         # supervisor + сглобяване на LangGraph графа
+├── src/
+│   ├── config.py        # настройки + фабрика за LLM клиента (anthropic/ollama)
+│   ├── i18n.py          # двуезичните текстове (bg/en) + t() функция
+│   ├── tools.py         # инструментите (mock Jira, линтер, QA чеклист)
+│   ├── agents.py        # тримата работни агенти (ReAct)
+│   └── graph.py         # supervisor + сглобяване на LangGraph графа
+└── tests/               # pytest пакет — целият workflow, без реални LLM извиквания
 ```
 
 Препоръчителен ред на четене за учене:
@@ -82,6 +83,26 @@ python main.py "Напиши функция, която обръща string на
 
 # Уеб UI (превключватели за език и доставчик в страничната лента)
 streamlit run app.py
+```
+
+## Тестове
+
+Проектът има pytest пакет (`tests/`), който покрива целия workflow **без
+нито едно реално LLM извикване** — супервайзорът и работниците се
+подменят със скриптирани дубльори (test doubles), затова тестовете са
+бързи, безплатни и детерминистични:
+
+- **unit тестове** — инструментите, i18n, config, помощните функции;
+- **интеграционни** — истинските ReAct агенти (`create_agent`) +
+  истинските mock инструменти, задвижвани от фалшив tool-calling модел;
+- **E2E workflow** — реалният граф: happy path
+  (analyst → developer → qa → FINISH), rework цикълът при `NEEDS_WORK`,
+  незабавен FINISH, защитата `recursion_limit`, streaming контрактът и
+  двуезичните промптове.
+
+```bash
+python -m pytest              # целият пакет (~5 сек)
+python -m pytest tests/test_workflow_e2e.py -v   # само E2E сценариите
 ```
 
 ## Двуезична поддръжка (bg/en)

@@ -78,7 +78,7 @@ def estimate_cost_usd(model_name: str, usage: dict) -> float | None:
     )
 
 
-def get_llm(role: str = "default"):
+def get_llm(role: str = "default", model_override: str | None = None):
     """
     Създава и връща LLM клиент според избрания доставчик и РОЛЯ.
 
@@ -88,6 +88,10 @@ def get_llm(role: str = "default"):
          от едно място (LLM_PROVIDER в .env, без промяна по кода).
       3. Всяка роля да може да ползва РАЗЛИЧЕН модел (model routing):
          get_llm("supervisor") чете MODEL_SUPERVISOR, ако е зададен.
+
+    model_override заобикаля резолюцията по роля - ползва се от
+    fallback веригата (виж fallback_model_name), която строи втори
+    клиент с ИЗРИЧНО зададен резервен модел.
 
     Четем средата при ВСЯКО извикване (не веднъж на import), за да
     може UI-ят (app.py) да превключва доставчика по време на работа.
@@ -108,7 +112,7 @@ def get_llm(role: str = "default"):
         # когато се ползва само anthropic.
         from langchain_ollama import ChatOllama
 
-        model = os.getenv(f"OLLAMA_MODEL_{role.upper()}", "") or OLLAMA_MODEL
+        model = model_override or os.getenv(f"OLLAMA_MODEL_{role.upper()}", "") or OLLAMA_MODEL
 
         return ChatOllama(
             model=model,
@@ -125,7 +129,7 @@ def get_llm(role: str = "default"):
                 "и попълни ключа си от https://platform.claude.com/"
             )
 
-        model = os.getenv(f"MODEL_{role.upper()}", "") or MODEL_NAME
+        model = model_override or os.getenv(f"MODEL_{role.upper()}", "") or MODEL_NAME
 
         # Забележка: най-новите Claude модели (Opus 5 и нагоре) не приемат
         # параметъра temperature - поведението се управлява чрез промпта.
@@ -140,6 +144,51 @@ def get_llm(role: str = "default"):
     raise ValueError(
         f"Непознат LLM_PROVIDER: {provider!r}. Валидни: 'anthropic', 'ollama'."
     )
+
+
+def fallback_model_name() -> str:
+    """
+    Името на РЕЗЕРВНИЯ модел за fallback веригата (improvement.md §2.7).
+
+    Празен низ = fallback изключен (по подразбиране). Задава се с
+    MODEL_FALLBACK (anthropic) / OLLAMA_MODEL_FALLBACK (ollama) - при
+    неуспех на основния модел (изчерпани retries, timeout) критичните
+    структурирани решения (triage, QA присъда) се опитват с резервния.
+    """
+    provider = os.getenv("LLM_PROVIDER", "anthropic").strip().lower()
+    key = "OLLAMA_MODEL_FALLBACK" if provider == "ollama" else "MODEL_FALLBACK"
+    return os.getenv(key, "").strip()
+
+
+# ---------------------------------------------------------------------------
+# Checkpointer - устойчивост на състоянието (improvement.md §2.2)
+# ---------------------------------------------------------------------------
+# С включен checkpointer всяка стъпка на графа се записва в SQLite файл:
+# крашнал run се възобновява от последния завършен възел (същият
+# thread_id), вместо да започва отначало (и да плаща токъните повторно).
+# Checkpoint историята е и одитна следа - кой възел какво е решил.
+# В продукция файлът се заменя с PostgresSaver - интерфейсът е същият.
+
+
+def get_checkpointer():
+    """
+    SQLite checkpointer, ако е конфигуриран (CHECKPOINT_SQLITE_PATH).
+
+    Връща None при липсваща настройка - графът тогава работи както
+    досега, изцяло в паметта. Import-ът е lazy: пакетът
+    langgraph-checkpoint-sqlite не е нужен, докато не се включи.
+    """
+    path = os.getenv("CHECKPOINT_SQLITE_PATH", "").strip()
+    if not path:
+        return None
+
+    import sqlite3
+
+    from langgraph.checkpoint.sqlite import SqliteSaver
+
+    # check_same_thread=False: Streamlit/LangGraph могат да пипат
+    # връзката от различни нишки; SqliteSaver си слага собствен lock.
+    return SqliteSaver(sqlite3.connect(path, check_same_thread=False))
 
 
 # ---------------------------------------------------------------------------

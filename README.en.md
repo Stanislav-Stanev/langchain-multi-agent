@@ -46,8 +46,11 @@ not LLM decisions:
   `NEEDS_WORK` the task goes back to the Developer, but at most
   `MAX_REWORK` times (default 3), then `ESCALATED` instead of an
   endless loop;
-- optional: a different model per role (`MODEL_SUPERVISOR`, ...) and a
-  hard per-run budget limit (`MAX_COST_USD_PER_RUN`).
+- optional: a different model per role (`MODEL_SUPERVISOR`, ...), a
+  hard per-run budget limit (`MAX_COST_USD_PER_RUN`), a fallback model
+  when the primary fails (`MODEL_FALLBACK`), and **checkpointing** into
+  SQLite (`CHECKPOINT_SQLITE_PATH`) — an interrupted run resumes from
+  the last saved step (one thread per task).
 
 ## Project structure
 

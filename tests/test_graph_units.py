@@ -24,6 +24,7 @@ from src.graph import (
     make_analyst_node,
     make_developer_node,
     make_qa_node,
+    make_structured_llm,
     make_supervisor_node,
     max_rework,
     route_next,
@@ -243,6 +244,74 @@ class TestQaNode:
         node, verdict_llm = self._node([verdict("APPROVED")], report="УНИКАЛЕН-ДОКЛАД")
         node({"messages": []})
         assert "УНИКАЛЕН-ДОКЛАД" in str(verdict_llm.calls[0])
+
+
+class TestStructuredLlmFallback:
+    """Fallback веригата на критичните структурирани решения (§2.7)."""
+
+    @staticmethod
+    def _fake_get_llm(primary, fallback):
+        """get_llm дубльор: без model_override връща основния, с - резервния."""
+
+        class _Factory:
+            def __init__(self, runnable):
+                self.runnable = runnable
+
+            def with_structured_output(self, schema):
+                return self.runnable
+
+        def fake(role="default", model_override=None):
+            return _Factory(fallback if model_override else primary)
+
+        return fake
+
+    def test_without_fallback_returns_primary_untouched(self, monkeypatch):
+        from src import graph as graph_module
+
+        primary = object()  # маркер - никаква верига не бива да се строи
+        monkeypatch.setattr(
+            graph_module, "get_llm", self._fake_get_llm(primary, object())
+        )
+        assert make_structured_llm("supervisor", SupervisorDecision) is primary
+
+    def test_fallback_recovers_when_primary_fails(self, monkeypatch):
+        from langchain_core.runnables import RunnableLambda
+
+        from src import graph as graph_module
+
+        def _boom(_):
+            raise RuntimeError("529 overloaded")
+
+        primary = RunnableLambda(_boom)
+        fallback = RunnableLambda(lambda _: decide("analyst", "резервен модел"))
+
+        monkeypatch.setenv("MODEL_FALLBACK", "claude-sonnet-5")
+        monkeypatch.setattr(
+            graph_module, "get_llm", self._fake_get_llm(primary, fallback)
+        )
+
+        chain = make_structured_llm("supervisor", SupervisorDecision)
+        decision = chain.invoke("задача")
+        assert decision.next == "analyst"
+        assert decision.reason == "резервен модел"
+
+    def test_primary_error_propagates_without_fallback(self, monkeypatch):
+        from langchain_core.runnables import RunnableLambda
+
+        from src import graph as graph_module
+
+        def _boom(_):
+            raise RuntimeError("529 overloaded")
+
+        monkeypatch.setattr(
+            graph_module,
+            "get_llm",
+            self._fake_get_llm(RunnableLambda(_boom), None),
+        )
+
+        chain = make_structured_llm("supervisor", SupervisorDecision)
+        with pytest.raises(RuntimeError, match="529"):
+            chain.invoke("задача")
 
 
 class TestGraphStructure:

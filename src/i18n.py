@@ -108,6 +108,10 @@ STRINGS = {
         "bg": "Финален статус: {status}",
         "en": "Final status: {status}",
     },
+    "thread_line": {
+        "bg": "Checkpointing: включен | thread_id: {thread} (същият thread_id продължава run-а)",
+        "en": "Checkpointing: on | thread_id: {thread} (the same thread_id resumes the run)",
+    },
     "budget_stop": {
         "bg": (
             "СТОП: бюджетът за изпълнение (~${limit}) е надвишен "

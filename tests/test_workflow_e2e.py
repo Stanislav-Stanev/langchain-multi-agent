@@ -230,6 +230,74 @@ class TestTriage:
         assert state["final_status"] == "APPROVED"
 
 
+class TestCheckpointer:
+    """Устойчивост на състоянието (improvement.md §2.2): с checkpointer
+    всяка стъпка се записва и run-ът е адресируем по thread_id."""
+
+    def test_state_is_persisted_per_thread(self, scripted_graph):
+        from langgraph.checkpoint.memory import InMemorySaver
+
+        h = scripted_graph(checkpointer=InMemorySaver())
+        thread = {"configurable": {"thread_id": "DEV-101"}}
+
+        h.graph.invoke(
+            {"messages": [HumanMessage(content=TASK)]},
+            config={**thread, "recursion_limit": 25},
+        )
+
+        # Състоянието е ЗАПАЗЕНО и адресируемо по thread_id - това е
+        # основата за resume и за одитната следа.
+        saved = h.graph.get_state(thread)
+        assert saved.values["final_status"] == "APPROVED"
+        assert [m.name for m in saved.values["messages"]] == [
+            None, "analyst", "developer", "qa",
+        ]
+
+    def test_same_thread_resumes_the_conversation(self, scripted_graph):
+        from langgraph.checkpoint.memory import InMemorySaver
+
+        h = scripted_graph(checkpointer=InMemorySaver())
+        thread = {"configurable": {"thread_id": "DEV-101"}}
+        cfg = {**thread, "recursion_limit": 25}
+
+        first = h.graph.invoke({"messages": [HumanMessage(content=TASK)]}, config=cfg)
+        second = h.graph.invoke(
+            {"messages": [HumanMessage(content="Продължи със същия тикет.")]},
+            config=cfg,
+        )
+
+        # Вторият run ПРОДЪЛЖАВА историята на нишката, не започва наново
+        assert len(second["messages"]) > len(first["messages"])
+
+    def test_different_threads_are_isolated(self, scripted_graph):
+        from langgraph.checkpoint.memory import InMemorySaver
+
+        h = scripted_graph(checkpointer=InMemorySaver())
+
+        h.graph.invoke(
+            {"messages": [HumanMessage(content=TASK)]},
+            config={"configurable": {"thread_id": "DEV-101"}, "recursion_limit": 25},
+        )
+
+        other = h.graph.get_state({"configurable": {"thread_id": "DEV-999"}})
+        assert other.values == {}  # чужда нишка -> празно състояние
+
+    def test_sqlite_checkpointer_writes_to_disk(self, scripted_graph, monkeypatch, tmp_path):
+        # Пълният кръг: env настройка -> SqliteSaver -> реален файл на диска
+        from src.config import get_checkpointer
+
+        db_path = tmp_path / "checkpoints.sqlite"
+        monkeypatch.setenv("CHECKPOINT_SQLITE_PATH", str(db_path))
+
+        h = scripted_graph(checkpointer=get_checkpointer())
+        h.graph.invoke(
+            {"messages": [HumanMessage(content=TASK)]},
+            config={"configurable": {"thread_id": "DEV-101"}, "recursion_limit": 25},
+        )
+
+        assert db_path.exists() and db_path.stat().st_size > 0
+
+
 class TestRecursionGuard:
     def test_recursion_limit_is_still_the_emergency_brake(self, scripted_graph):
         # Бизнес лимитите (rework, DoD) спират циклите ЕЛЕГАНТНО, но

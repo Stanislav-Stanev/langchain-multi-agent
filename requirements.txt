@@ -27,6 +27,9 @@ langchain-ollama==1.1.0
 # Streamlit - локален уеб UI за визуализация на workflow-а (app.py)
 streamlit==1.62.0
 
+# SQLite checkpointer - устойчивост/resume на изпълненията (CHECKPOINT_SQLITE_PATH)
+langgraph-checkpoint-sqlite==3.1.1
+
 # === Тестове и качество на кода ===
 
 # Pytest - тестовата рамка (tests/ покрива целия workflow без реални LLM извиквания)

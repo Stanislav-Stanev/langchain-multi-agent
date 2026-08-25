@@ -12,3 +12,6 @@ venv/
 
 # Coverage данни (pytest-cov)
 .coverage
+
+# Checkpointer бази (CHECKPOINT_SQLITE_PATH) - локално състояние на run-ове
+*.sqlite

@@ -32,11 +32,15 @@ from src.graph import QAVerdict, SupervisorDecision
 
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch):
-    """Праща всеки тест към езика по подразбиране (bg) и стандартния
-    rework лимит, независимо от средата на разработчика. Тестове, които
-    проверяват друго, сами си задават стойностите с monkeypatch."""
+    """Праща всеки тест към стойностите по подразбиране (език bg,
+    стандартен rework лимит, без fallback модел и без checkpointer),
+    независимо от средата на разработчика. Тестове, които проверяват
+    друго, сами си задават стойностите с monkeypatch."""
     monkeypatch.delenv("APP_LANG", raising=False)
     monkeypatch.delenv("MAX_REWORK", raising=False)
+    monkeypatch.delenv("MODEL_FALLBACK", raising=False)
+    monkeypatch.delenv("OLLAMA_MODEL_FALLBACK", raising=False)
+    monkeypatch.delenv("CHECKPOINT_SQLITE_PATH", raising=False)
 
 
 # ---------------------------------------------------------------------------
@@ -161,6 +165,7 @@ def scripted_graph(monkeypatch):
         analyst_outputs=None,
         developer_outputs=None,
         qa_outputs=None,
+        checkpointer=None,
     ):
         supervisor = _ScriptedLLM(
             [decide(d) if isinstance(d, str) else d for d in decisions]
@@ -177,11 +182,20 @@ def scripted_graph(monkeypatch):
         }
 
         factory = FakeLLMFactory(supervisor, verdict_llm)
-        monkeypatch.setattr(graph_module, "get_llm", lambda role="default": factory)
+        monkeypatch.setattr(
+            graph_module,
+            "get_llm",
+            lambda role="default", model_override=None: factory,
+        )
         monkeypatch.setattr(graph_module, "create_analyst", lambda: workers["analyst"])
         monkeypatch.setattr(graph_module, "create_developer", lambda: workers["developer"])
         monkeypatch.setattr(graph_module, "create_qa", lambda: workers["qa"])
 
-        return GraphHarness(graph_module.build_graph(), supervisor, verdict_llm, workers)
+        return GraphHarness(
+            graph_module.build_graph(checkpointer=checkpointer),
+            supervisor,
+            verdict_llm,
+            workers,
+        )
 
     return _build

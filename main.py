@@ -19,6 +19,8 @@
   4. накрая - обобщение на маршрута, токъните и цената.
 """
 
+import hashlib
+import os
 import sys
 
 from langchain_core.callbacks import UsageMetadataCallbackHandler
@@ -27,6 +29,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from src.config import (
     budget_exceeded,
     estimate_cost_usd,
+    get_checkpointer,
     run_budget_usd,
     total_cost_usd,
 )
@@ -77,8 +80,20 @@ def main() -> None:
     print(ARCHITECTURE)
     print(f"{t('task_label')}: {task}")
 
-    # Сглобяваме графа (виж src/graph.py за архитектурата)
-    graph = build_graph()
+    # Сглобяваме графа (виж src/graph.py за архитектурата).
+    # С CHECKPOINT_SQLITE_PATH в .env всяка стъпка се записва в SQLite:
+    # прекъснат run със СЪЩИЯ thread_id продължава оттам, докъдето е
+    # стигнал (improvement.md §2.2). Без настройката - всичко в паметта.
+    checkpointer = get_checkpointer()
+    graph = build_graph(checkpointer=checkpointer)
+
+    run_config: dict = {"recursion_limit": 25}
+    if checkpointer is not None:
+        # Нишката = задачата: повторен старт със същата задача (или с
+        # изричен THREAD_ID) възобновява същия разговор.
+        thread_id = os.getenv("THREAD_ID") or hashlib.sha1(task.encode()).hexdigest()[:12]
+        run_config["configurable"] = {"thread_id": thread_id}
+        print(t("thread_line", thread=thread_id))
 
     step_no = 0    # пореден номер на стъпка в главния граф (за четимост)
     route = []     # маршрутът през възлите - за финалното обобщение
@@ -103,7 +118,7 @@ def main() -> None:
     # никога не каже FINISH, графът спира принудително след N стъпки.
     for namespace, step in graph.stream(
         {"messages": [HumanMessage(content=task)]},
-        config={"recursion_limit": 25, "callbacks": [usage_cb]},
+        config={**run_config, "callbacks": [usage_cb]},
         stream_mode="updates",
         subgraphs=True,
     ):

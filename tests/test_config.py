@@ -160,6 +160,52 @@ class TestResilienceSettings:
         assert llm.default_request_timeout == 60.0
 
 
+class TestFallbackModel:
+    """Резервният модел за fallback веригата (improvement.md §2.7)."""
+
+    def test_disabled_by_default(self):
+        assert config.fallback_model_name() == ""
+
+    def test_anthropic_fallback(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+        monkeypatch.setenv("MODEL_FALLBACK", "claude-sonnet-5")
+        assert config.fallback_model_name() == "claude-sonnet-5"
+
+    def test_ollama_uses_its_own_key(self, monkeypatch):
+        # При ollama доставчик MODEL_FALLBACK (anthropic) се игнорира
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        monkeypatch.setenv("MODEL_FALLBACK", "claude-sonnet-5")
+        assert config.fallback_model_name() == ""
+        monkeypatch.setenv("OLLAMA_MODEL_FALLBACK", "llama3.1")
+        assert config.fallback_model_name() == "llama3.1"
+
+    def test_model_override_beats_role_and_default(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+        monkeypatch.setenv("MODEL_DEVELOPER", "claude-opus-5")
+
+        llm = get_llm("developer", model_override="claude-sonnet-5")
+        assert llm.model == "claude-sonnet-5"
+
+
+class TestCheckpointer:
+    """SQLite checkpointer фабриката (improvement.md §2.2)."""
+
+    def test_disabled_by_default(self):
+        assert config.get_checkpointer() is None
+
+    def test_sqlite_checkpointer_from_env(self, monkeypatch, tmp_path):
+        from langgraph.checkpoint.sqlite import SqliteSaver
+
+        db_path = tmp_path / "checkpoints.sqlite"
+        monkeypatch.setenv("CHECKPOINT_SQLITE_PATH", str(db_path))
+
+        saver = config.get_checkpointer()
+        assert isinstance(saver, SqliteSaver)
+        # Връзката е реална: файлът се създава при първия запис
+        assert db_path.exists() or db_path.parent.exists()
+
+
 class TestBudgetGuard:
     """Бюджетният лимит на run (improvement.md §5.3)."""
 

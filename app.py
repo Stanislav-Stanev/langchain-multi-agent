@@ -14,6 +14,7 @@
 build_graph() взима при сглобяване (за промптовете на агентите).
 """
 
+import hashlib
 import os
 import time
 
@@ -25,6 +26,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from src.config import (
     budget_exceeded,
     estimate_cost_usd,
+    get_checkpointer,
     run_budget_usd,
     total_cost_usd,
 )
@@ -96,10 +98,11 @@ os.environ["LLM_PROVIDER"] = provider
 @st.cache_resource(show_spinner="⏳")
 def get_graph(provider_key: str, lang_key: str):
     """Кешира по един компилиран граф на (доставчик, език) - промптовете
-    на агентите се фиксират при сглобяване, затова езикът е част от ключа."""
+    на агентите се фиксират при сглобяване, затова езикът е част от ключа.
+    С CHECKPOINT_SQLITE_PATH графът пази всяка стъпка в SQLite (resume)."""
     os.environ["LLM_PROVIDER"] = provider_key
     os.environ["APP_LANG"] = lang_key
-    return build_graph()
+    return build_graph(checkpointer=get_checkpointer())
 
 
 # ---------------------------------------------------------------------------
@@ -176,9 +179,17 @@ if run:
     try:
         # Същата стрийминг логика като main.py: subgraphs=True ни дава и
         # ВЪТРЕШНИТЕ стъпки на агентите (инструменти), не само възлите.
+        # При включен checkpointer нишката = задачата: повторен run със
+        # същия текст продължава същия разговор (resume семантика).
+        run_config: dict = {"recursion_limit": 25, "callbacks": [usage_cb]}
+        if os.getenv("CHECKPOINT_SQLITE_PATH", "").strip():
+            run_config["configurable"] = {
+                "thread_id": hashlib.sha1(task.encode()).hexdigest()[:12]
+            }
+
         for namespace, step in graph.stream(
             {"messages": [HumanMessage(content=task)]},
-            config={"recursion_limit": 25, "callbacks": [usage_cb]},
+            config=run_config,
             stream_mode="updates",
             subgraphs=True,
         ):

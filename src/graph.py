@@ -63,7 +63,7 @@ from langgraph.graph import END, START, MessagesState, StateGraph
 from pydantic import BaseModel, Field
 
 from src.agents import create_analyst, create_developer, create_qa
-from src.config import get_llm
+from src.config import fallback_model_name, get_llm
 from src.i18n import get_lang, t
 
 # Имената на работните агенти - изнесени като константа, за да ги
@@ -436,18 +436,45 @@ def make_qa_node(agent, verdict_llm):
 # ---------------------------------------------------------------------------
 
 
-def build_graph():
+def make_structured_llm(role: str, schema):
+    """
+    Структуриран LLM за критичните решения, с опционална fallback верига
+    (improvement.md §2.7).
+
+    Без MODEL_FALLBACK: просто get_llm(role) + схемата. С MODEL_FALLBACK:
+    при неуспех на основния модел (изчерпани retries, timeout, 5xx)
+    същото решение се опитва ВТОРИ път с резервния модел - triage и QA
+    присъдата са твърде важни, за да умре целият run от една грешка на
+    доставчика. (Работните агенти разчитат на client-level retries -
+    fallback на ниво ReAct агент би сменил модела по средата на цикъла.)
+    """
+    primary = get_llm(role).with_structured_output(schema)
+
+    fallback_model = fallback_model_name()
+    if not fallback_model:
+        return primary
+
+    fallback = get_llm(role, model_override=fallback_model).with_structured_output(schema)
+    return primary.with_fallbacks([fallback])
+
+
+def build_graph(checkpointer=None):
     """
     Сглобява и компилира мултиагентния граф.
 
     Всичко LLM-зависимо (агенти, супервайзор, екстрактор на присъдата)
     се създава ТУК, при всяко извикване - така графът отразява текущия
     LLM_PROVIDER (и per-role моделите) от средата.
+
+    checkpointer (по избор, improvement.md §2.2): подаден SqliteSaver /
+    PostgresSaver прави всяка стъпка устойчива - run със същия thread_id
+    продължава от последния запазен checkpoint (resume). None = както
+    досега, всичко в паметта. Създава се от config.get_checkpointer().
     """
     # LLM клиенти, "закотвени" към Pydantic схемите: with_structured_output
     # гарантира, че отговорът е точно SupervisorDecision / QAVerdict.
-    supervisor_llm = get_llm("supervisor").with_structured_output(SupervisorDecision)
-    verdict_llm = get_llm("qa").with_structured_output(QAVerdict)
+    supervisor_llm = make_structured_llm("supervisor", SupervisorDecision)
+    verdict_llm = make_structured_llm("qa", QAVerdict)
 
     builder = StateGraph(TeamState)
 
@@ -467,4 +494,4 @@ def build_graph():
         builder.add_conditional_edges(node, route_next, [*WORKERS, END])
 
     # compile() превръща описанието в изпълним обект с .invoke()/.stream()
-    return builder.compile()
+    return builder.compile(checkpointer=checkpointer)

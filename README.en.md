@@ -59,11 +59,15 @@ langchain-multi-agent/
 ├── main.py              # entry point — runs the graph (console)
 ├── app.py               # Streamlit web UI with live visualization
 ├── draw_graph.py        # Mermaid diagram of the graph (local, no LLM)
-├── requirements.txt     # dependencies
+├── requirements.txt     # dependencies (pinned versions)
 ├── pytest.ini           # pytest configuration (the tests in tests/)
+├── ruff.toml            # linter configuration (ruff)
+├── improvement.md       # the productionization plan (what and why)
 ├── .env.example         # settings template (copy as .env)
 ├── CHANGELOG.md         # release notes (Keep a Changelog)
 ├── README.en.md         # this file — English mirror of README.md
+├── .github/workflows/
+│   └── ci.yml           # CI: ruff + pytest + 85% coverage of src/
 ├── .githooks/
 │   ├── pre-commit       # hook: protects main from direct commits
 │   └── pre-push         # hook: protects main + Claude syncs docs/changelog
@@ -74,6 +78,7 @@ langchain-multi-agent/
 │   ├── agents.py        # the three worker agents (ReAct)
 │   └── graph.py         # supervisor + LangGraph graph assembly
 └── tests/               # pytest suite — the full workflow, no real LLM calls
+    └── evals/           # golden evals with a REAL LLM (run explicitly)
 ```
 
 Recommended reading order for learning:

@@ -52,11 +52,15 @@ langchain-multi-agent/
 ├── main.py              # входна точка — стартира графа (конзола)
 ├── app.py               # Streamlit уеб UI с визуализация на живо
 ├── draw_graph.py        # Mermaid диаграма на графа (локално, без LLM)
-├── requirements.txt     # зависимости
+├── requirements.txt     # зависимости (pinned версии)
 ├── pytest.ini           # конфигурация на pytest (тестовете в tests/)
+├── ruff.toml            # конфигурация на линтера (ruff)
+├── improvement.md       # планът за продукционизиране (какво и защо)
 ├── .env.example         # шаблон за настройките (копирай като .env)
 ├── CHANGELOG.md         # release notes (Keep a Changelog)
 ├── README.en.md         # английско огледало на този файл
+├── .github/workflows/
+│   └── ci.yml           # CI: ruff + pytest + 85% покритие на src/
 ├── .githooks/
 │   ├── pre-commit       # hook: пази main от директни комити
 │   └── pre-push         # hook: пази main + Claude синхронизира docs/changelog
@@ -67,6 +71,7 @@ langchain-multi-agent/
 │   ├── agents.py        # тримата работни агенти (ReAct)
 │   └── graph.py         # supervisor + сглобяване на LangGraph графа
 └── tests/               # pytest пакет — целият workflow, без реални LLM извиквания
+    └── evals/           # golden evals с РЕАЛЕН LLM (пускат се изрично)
 ```
 
 Препоръчителен ред на четене за учене:

@@ -33,10 +33,24 @@ requirement in a ticket to reviewed and approved code.
 | **Developer**  | Implementation | `get_coding_standards` (company rules)    |
 | **QA**         | Testing/Review | `check_code_syntax`, `run_test_checklist` |
 
-The flow is **analyst → developer → qa → FINISH**, but each step is
-decided by the Supervisor (an LLM) itself. If QA returns `NEEDS_WORK`,
-the Supervisor sends the task back to the Developer — i.e. the system
-has a rework loop, just like a real team.
+The flow is **analyst → developer → qa → FINISH**. The Supervisor (an
+LLM) performs only a **one-time triage** — where the task enters (or
+FINISH for a non-software task); everything after that is
+**deterministic code** over typed artifacts (spec, code, QA verdict),
+not LLM decisions:
+
+- every phase has a **Definition of Done** checked by code (non-empty
+  spec, extracted and syntactically valid code) — a missed DoD gives
+  the agent one retry, then escalates to a human;
+- the QA verdict is **structured** (`QAVerdict`, Pydantic) — on
+  `NEEDS_WORK` the task goes back to the Developer, but at most
+  `MAX_REWORK` times (default 3), then `ESCALATED` instead of an
+  endless loop;
+- optional: a different model per role (`MODEL_SUPERVISOR`, ...), a
+  hard per-run budget limit (`MAX_COST_USD_PER_RUN`), a fallback model
+  when the primary fails (`MODEL_FALLBACK`), and **checkpointing** into
+  SQLite (`CHECKPOINT_SQLITE_PATH`) — an interrupted run resumes from
+  the last saved step (one thread per task).
 
 ## Project structure
 
@@ -44,12 +58,16 @@ has a rework loop, just like a real team.
 langchain-multi-agent/
 ├── main.py              # entry point — runs the graph (console)
 ├── app.py               # Streamlit web UI with live visualization
-├── langgraph.json       # LangGraph Studio configuration
-├── requirements.txt     # dependencies
+├── draw_graph.py        # Mermaid diagram of the graph (local, no LLM)
+├── requirements.txt     # dependencies (pinned versions)
 ├── pytest.ini           # pytest configuration (the tests in tests/)
+├── ruff.toml            # linter configuration (ruff)
+├── improvement.md       # the productionization plan (what and why)
 ├── .env.example         # settings template (copy as .env)
 ├── CHANGELOG.md         # release notes (Keep a Changelog)
 ├── README.en.md         # this file — English mirror of README.md
+├── .github/workflows/
+│   └── ci.yml           # CI: ruff + pytest + 85% coverage of src/
 ├── .githooks/
 │   ├── pre-commit       # hook: protects main from direct commits
 │   └── pre-push         # hook: protects main + Claude syncs docs/changelog
@@ -60,6 +78,7 @@ langchain-multi-agent/
 │   ├── agents.py        # the three worker agents (ReAct)
 │   └── graph.py         # supervisor + LangGraph graph assembly
 └── tests/               # pytest suite — the full workflow, no real LLM calls
+    └── evals/           # golden evals with a REAL LLM (run explicitly)
 ```
 
 Recommended reading order for learning:
@@ -99,17 +118,21 @@ The project has a pytest suite (`tests/`) covering the full workflow
 replaced with scripted test doubles, so the tests are fast, free and
 deterministic:
 
-- **unit tests** — the tools, i18n, config, helper functions;
+- **unit tests** — the tools, i18n, config, the graph's building blocks;
 - **integration** — the real ReAct agents (`create_agent`) + the real
   mock tools, driven by a fake tool-calling model;
-- **E2E workflow** — the real graph: the happy path
-  (analyst → developer → qa → FINISH), the `NEEDS_WORK` rework loop,
-  immediate FINISH, the `recursion_limit` guard, the streaming contract
-  and the bilingual prompts.
+- **E2E workflow** — the real graph: the happy path, the rework loop
+  and its limit, Definition of Done (retry + escalation), the triage
+  entries, the streaming contract and the bilingual texts;
+- **evals** (`tests/evals/`) — the quality of the REAL LLM decisions:
+  a golden dataset (versioned YAML in the repo) + LLM-as-judge through
+  the same `get_llm()`. Excluded from the default run (real costs!) —
+  run explicitly.
 
 ```bash
-python -m pytest              # the whole suite (~5 s)
-python -m pytest tests/test_workflow_e2e.py -v   # E2E scenarios only
+python -m pytest              # the deterministic suite (~5 s, no LLM)
+ruff check .                  # linter (the same one CI runs)
+python -m pytest -m eval      # golden evals (real LLM, real costs)
 ```
 
 ## Bilingual support (bg/en)

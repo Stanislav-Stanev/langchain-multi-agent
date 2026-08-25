@@ -13,9 +13,8 @@ AIMessage-и (с tool_calls), а create_agent + LangGraph изпълняват
   3. system prompt-ът се избира според текущия език.
 """
 
-from typing import Any, List
+from typing import Any
 
-import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
@@ -33,9 +32,9 @@ class ScriptedToolCallingModel(BaseChatModel):
     за да проверим какво е стигнало до "модела".
     """
 
-    script: List[AIMessage]
-    received: List[Any] = []
-    bound_tools: List[Any] = []
+    script: list[AIMessage]
+    received: list[Any] = []
+    bound_tools: list[Any] = []
 
     def bind_tools(self, tools, **kwargs):
         self.bound_tools = list(tools)
@@ -60,15 +59,16 @@ def tool_call(name: str, args: dict, call_id: str = "call_1") -> AIMessage:
 
 
 def install_model(monkeypatch, script) -> ScriptedToolCallingModel:
-    """Подменя get_llm В src.agents, така че create_* да получи дубльора."""
+    """Подменя get_llm В src.agents, така че create_* да получи дубльора.
+    Приема role аргумента (model routing) - дубльорът е един за всички роли."""
     model = ScriptedToolCallingModel(script=list(script), received=[], bound_tools=[])
-    monkeypatch.setattr(agents_module, "get_llm", lambda: model)
+    monkeypatch.setattr(agents_module, "get_llm", lambda role="default": model)
     return model
 
 
 class TestAnalystAgent:
     def test_fetches_ticket_and_returns_spec(self, monkeypatch):
-        model = install_model(
+        install_model(
             monkeypatch,
             [
                 tool_call("get_ticket_details", {"ticket_id": "DEV-101"}),
@@ -128,7 +128,7 @@ class TestDeveloperAgent:
 class TestQaAgent:
     def test_runs_both_checks_and_reports_status(self, monkeypatch):
         code = 'def f(x: int) -> int:\n    """d"""\n    if not x:\n        raise ValueError\n    return x'
-        model = install_model(
+        install_model(
             monkeypatch,
             [
                 tool_call("check_code_syntax", {"code": code}, "call_1"),

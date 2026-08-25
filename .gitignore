@@ -7,8 +7,11 @@ __pycache__/
 .venv/
 venv/
 
-# Локално състояние на LangGraph Studio dev сървъра
-.langgraph_api/
-
 # Pytest cache
 .pytest_cache/
+
+# Coverage данни (pytest-cov)
+.coverage
+
+# Checkpointer бази (CHECKPOINT_SQLITE_PATH) - локално състояние на run-ове
+*.sqlite

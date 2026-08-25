@@ -72,7 +72,9 @@ Rules:
 def create_analyst():
     """Създава Analyst агента с достъп до тикет системата."""
     return create_agent(
-        model=get_llm(),
+        # Ролята се подава на фабриката - така Analyst може да ползва
+        # различен (по-евтин) модел от Developer (model routing, §2.5).
+        model=get_llm("analyst"),
         tools=[get_ticket_details],
         system_prompt=ANALYST_PROMPTS[get_lang()],
     )
@@ -120,7 +122,7 @@ Rules:
 def create_developer():
     """Създава Developer агента с достъп до стандартите за кодиране."""
     return create_agent(
-        model=get_llm(),
+        model=get_llm("developer"),
         tools=[get_coding_standards],
         system_prompt=DEVELOPER_PROMPTS[get_lang()],
     )
@@ -174,7 +176,7 @@ Rules:
 def create_qa():
     """Създава QA агента с инструментите за проверка на код."""
     return create_agent(
-        model=get_llm(),
+        model=get_llm("qa"),
         tools=[check_code_syntax, run_test_checklist],
         system_prompt=QA_PROMPTS[get_lang()],
     )

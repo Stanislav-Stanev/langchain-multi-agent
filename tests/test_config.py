@@ -110,3 +110,124 @@ class TestGetLlm:
         assert isinstance(get_llm(), ChatAnthropic)
         monkeypatch.setenv("LLM_PROVIDER", "ollama")
         assert isinstance(get_llm(), ChatOllama)
+
+
+class TestModelRouting:
+    """Model routing по роля (improvement.md §2.5): всяка роля може да
+    получи собствен модел през среда, с fallback към общия MODEL_NAME."""
+
+    def test_role_specific_model_override(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+        monkeypatch.setenv("MODEL_SUPERVISOR", "claude-haiku-4-5")
+
+        assert get_llm("supervisor").model == "claude-haiku-4-5"
+        # Роля БЕЗ override пада към общия модел
+        assert get_llm("developer").model == config.MODEL_NAME
+
+    def test_ollama_role_override(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        monkeypatch.setenv("OLLAMA_MODEL_QA", "llama3.1")
+
+        assert get_llm("qa").model == "llama3.1"
+        assert get_llm("analyst").model == config.OLLAMA_MODEL
+
+    def test_default_role_uses_default_model(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+        assert get_llm().model == config.MODEL_NAME
+
+
+class TestResilienceSettings:
+    """Retry/timeout на LLM клиентите (improvement.md §2.7)."""
+
+    def test_default_retries_and_timeout(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+
+        llm = get_llm()
+        assert llm.max_retries == 3
+        assert llm.default_request_timeout == 120.0
+
+    def test_settings_are_configurable_from_env(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+        monkeypatch.setenv("LLM_MAX_RETRIES", "5")
+        monkeypatch.setenv("LLM_TIMEOUT_SECONDS", "60")
+
+        llm = get_llm()
+        assert llm.max_retries == 5
+        assert llm.default_request_timeout == 60.0
+
+
+class TestFallbackModel:
+    """Резервният модел за fallback веригата (improvement.md §2.7)."""
+
+    def test_disabled_by_default(self):
+        assert config.fallback_model_name() == ""
+
+    def test_anthropic_fallback(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+        monkeypatch.setenv("MODEL_FALLBACK", "claude-sonnet-5")
+        assert config.fallback_model_name() == "claude-sonnet-5"
+
+    def test_ollama_uses_its_own_key(self, monkeypatch):
+        # При ollama доставчик MODEL_FALLBACK (anthropic) се игнорира
+        monkeypatch.setenv("LLM_PROVIDER", "ollama")
+        monkeypatch.setenv("MODEL_FALLBACK", "claude-sonnet-5")
+        assert config.fallback_model_name() == ""
+        monkeypatch.setenv("OLLAMA_MODEL_FALLBACK", "llama3.1")
+        assert config.fallback_model_name() == "llama3.1"
+
+    def test_model_override_beats_role_and_default(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+        monkeypatch.setenv("MODEL_DEVELOPER", "claude-opus-5")
+
+        llm = get_llm("developer", model_override="claude-sonnet-5")
+        assert llm.model == "claude-sonnet-5"
+
+
+class TestCheckpointer:
+    """SQLite checkpointer фабриката (improvement.md §2.2)."""
+
+    def test_disabled_by_default(self):
+        assert config.get_checkpointer() is None
+
+    def test_sqlite_checkpointer_from_env(self, monkeypatch, tmp_path):
+        from langgraph.checkpoint.sqlite import SqliteSaver
+
+        db_path = tmp_path / "checkpoints.sqlite"
+        monkeypatch.setenv("CHECKPOINT_SQLITE_PATH", str(db_path))
+
+        saver = config.get_checkpointer()
+        assert isinstance(saver, SqliteSaver)
+        # Връзката е реална: файлът се създава при първия запис
+        assert db_path.exists() or db_path.parent.exists()
+
+
+class TestBudgetGuard:
+    """Бюджетният лимит на run (improvement.md §5.3)."""
+
+    def test_budget_disabled_by_default(self, monkeypatch):
+        monkeypatch.delenv("MAX_COST_USD_PER_RUN", raising=False)
+        assert config.run_budget_usd() == 0.0
+        assert config.budget_exceeded({"claude-opus-5": {"input_tokens": 10**9}}) is False
+
+    def test_invalid_budget_value_disables_the_guard(self, monkeypatch):
+        monkeypatch.setenv("MAX_COST_USD_PER_RUN", "безплатно")
+        assert config.run_budget_usd() == 0.0
+
+    def test_total_cost_sums_models_and_skips_free_ones(self):
+        usage = {
+            "claude-opus-5": {"input_tokens": 1_000_000, "output_tokens": 0},  # $5
+            "qwen3:8b": {"input_tokens": 10**9, "output_tokens": 10**9},       # локален -> $0
+        }
+        assert config.total_cost_usd(usage) == pytest.approx(5.00)
+
+    def test_budget_exceeded_when_cost_is_above_limit(self, monkeypatch):
+        monkeypatch.setenv("MAX_COST_USD_PER_RUN", "1.00")
+        over = {"claude-opus-5": {"input_tokens": 1_000_000, "output_tokens": 0}}   # $5
+        under = {"claude-opus-5": {"input_tokens": 100_000, "output_tokens": 0}}    # $0.50
+        assert config.budget_exceeded(over) is True
+        assert config.budget_exceeded(under) is False

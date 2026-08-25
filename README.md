@@ -28,10 +28,22 @@
 | **Developer**  | Implementation | `get_coding_standards` (фирмени правила) |
 | **QA**         | Testing/Review | `check_code_syntax`, `run_test_checklist`|
 
-Потокът е: **analyst → developer → qa → FINISH**, но решението на всяка
-стъпка взима самият Supervisor (LLM). Ако QA върне `NEEDS_WORK`,
-Supervisor връща задачата на Developer — т.е. системата има цикъл за
-поправки, точно като в истински екип.
+Потокът е: **analyst → developer → qa → FINISH**. Supervisor (LLM) прави
+само **еднократен triage** — откъде да влезе задачата (или FINISH за
+несофтуерна задача); всичко след това е **детерминистичен код** върху
+типизирани артефакти (спецификация, код, QA присъда), не LLM решения:
+
+- всяка фаза има **Definition of Done**, проверяван от кода (непразна
+  спецификация, извлечен и синтактично валиден код) — непокрит DoD дава
+  на агента един повторен опит, после ескалира към човек;
+- присъдата на QA е **структурирана** (`QAVerdict`, Pydantic) — при
+  `NEEDS_WORK` задачата се връща на Developer, но най-много `MAX_REWORK`
+  пъти (по подразбиране 3), после `ESCALATED` вместо вечен цикъл;
+- по избор: различен модел за всяка роля (`MODEL_SUPERVISOR`, ...),
+  твърд бюджетен лимит на изпълнение (`MAX_COST_USD_PER_RUN`), резервен
+  модел при срив на основния (`MODEL_FALLBACK`) и **checkpointing** в
+  SQLite (`CHECKPOINT_SQLITE_PATH`) — прекъснат run се възобновява от
+  последната записана стъпка (thread per задача).
 
 ## Структура на проекта
 
@@ -39,12 +51,16 @@ Supervisor връща задачата на Developer — т.е. система�
 langchain-multi-agent/
 ├── main.py              # входна точка — стартира графа (конзола)
 ├── app.py               # Streamlit уеб UI с визуализация на живо
-├── langgraph.json       # конфигурация за LangGraph Studio
-├── requirements.txt     # зависимости
+├── draw_graph.py        # Mermaid диаграма на графа (локално, без LLM)
+├── requirements.txt     # зависимости (pinned версии)
 ├── pytest.ini           # конфигурация на pytest (тестовете в tests/)
+├── ruff.toml            # конфигурация на линтера (ruff)
+├── improvement.md       # планът за продукционизиране (какво и защо)
 ├── .env.example         # шаблон за настройките (копирай като .env)
 ├── CHANGELOG.md         # release notes (Keep a Changelog)
 ├── README.en.md         # английско огледало на този файл
+├── .github/workflows/
+│   └── ci.yml           # CI: ruff + pytest + 85% покритие на src/
 ├── .githooks/
 │   ├── pre-commit       # hook: пази main от директни комити
 │   └── pre-push         # hook: пази main + Claude синхронизира docs/changelog
@@ -55,6 +71,7 @@ langchain-multi-agent/
 │   ├── agents.py        # тримата работни агенти (ReAct)
 │   └── graph.py         # supervisor + сглобяване на LangGraph графа
 └── tests/               # pytest пакет — целият workflow, без реални LLM извиквания
+    └── evals/           # golden evals с РЕАЛЕН LLM (пускат се изрично)
 ```
 
 Препоръчителен ред на четене за учене:
@@ -93,17 +110,21 @@ streamlit run app.py
 подменят със скриптирани дубльори (test doubles), затова тестовете са
 бързи, безплатни и детерминистични:
 
-- **unit тестове** — инструментите, i18n, config, помощните функции;
+- **unit тестове** — инструментите, i18n, config, градивните елементи на графа;
 - **интеграционни** — истинските ReAct агенти (`create_agent`) +
   истинските mock инструменти, задвижвани от фалшив tool-calling модел;
-- **E2E workflow** — реалният граф: happy path
-  (analyst → developer → qa → FINISH), rework цикълът при `NEEDS_WORK`,
-  незабавен FINISH, защитата `recursion_limit`, streaming контрактът и
-  двуезичните промптове.
+- **E2E workflow** — реалният граф: happy path, rework цикълът и лимитът
+  му, Definition of Done (повторен опит + ескалация), triage входовете,
+  streaming контрактът и двуезичните текстове;
+- **evals** (`tests/evals/`) — качеството на РЕАЛНИТЕ LLM решения:
+  golden dataset (версиониран YAML в репото) + LLM-as-judge през същото
+  `get_llm()`. Изключени от стандартния run (реални разходи!) — пускат
+  се изрично.
 
 ```bash
-python -m pytest              # целият пакет (~5 сек)
-python -m pytest tests/test_workflow_e2e.py -v   # само E2E сценариите
+python -m pytest              # детерминистичният пакет (~5 сек, без LLM)
+ruff check .                  # линтер (същият, който пуска и CI)
+python -m pytest -m eval      # golden evals (реален LLM, реални разходи)
 ```
 
 ## Двуезична поддръжка (bg/en)

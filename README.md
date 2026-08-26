@@ -96,9 +96,13 @@ langchain-multi-agent/
 │   ├── run_tracker.py   # runs/<дата_час>_<тикет>/ - журнал, стъпки, статус
 │   ├── step_plans.py    # шаблоните "план преди / изпълнение след" всяка стъпка
 │   ├── run_context.py   # RunCtx - контекстът на run-а за инструментите
+│   ├── jira_mcp.py      # prod: Jira през официалния Atlassian MCP сървър
+│   ├── repo_workspace.py# prod: git workspace + инструменти за четене/писане
+│   ├── publish.py       # prod: commit -> push -> draft PR (+ Jira коментар)
 │   ├── agents.py        # тримата работни агенти (ReAct)
 │   └── graph.py         # supervisor + планове + порти + сглобяване на графа
 ├── runs/                # (git-ignored) артефактите на всеки run
+├── workspace/           # (git-ignored) локалните клонове на репозиториите (prod)
 └── tests/               # pytest пакет — целият workflow, без реални LLM извиквания
     └── evals/           # golden evals с РЕАЛЕН LLM (пускат се изрично)
 ```
@@ -143,8 +147,8 @@ streamlit run app.py
 | | demo | prod |
 |---|------|------|
 | Тикети | примерните DEV-101 / DEV-102 (`src/tools.py`) | **реална Jira** през официалния Atlassian Remote MCP Server (`src/jira_mcp.py`) |
-| Код | ```python блок в отговора на Developer | промени в клонирани git репозитории → draft PR *(следваща стъпка)* |
-| Планове, стъпки, HITL | да | да |
+| Код | ```python блок в отговора на Developer | **реални промени в клонирани git репозитории** (`src/repo_workspace.py`) → **draft Pull Request** (`src/publish.py`) |
+| Планове, стъпки, HITL | да | да (+ порта `publish` преди push) |
 
 **Jira през MCP (prod).** Analyst ползва същия инструмент `get_ticket_details`,
 но зад него стои официалният Atlassian MCP сървър (`https://mcp.atlassian.com/v1/mcp`):
@@ -158,9 +162,21 @@ Analyst има и `search_tickets(jql)` за задачи без ключ (JQL �
 Грешките се връщат като текст, транспортните се повтарят с backoff; `mcp`
 пакетът се импортира само в prod. В UI-я има бутон „Тест на връзката с Jira".
 
-Git интеграцията (workspace, draft PR) идва в следващата стъпка от
-[docs/prod-mode-plan.md](docs/prod-mode-plan.md) — дотогава в prod Developer/QA
-работят както в demo. Без конфигурация UI-ят показва какво липсва и не пуска run.
+**Git workspace и draft PR (prod).** `PROD_REPOS` (owner/name или GitHub URL, със
+запетаи; мултиселект в UI-я) се клонират от `PROD_BASE_BRANCH` в `WORKSPACE_DIR`
+и всеки run започва на чист branch `multibot/<тикет>-<run>`. Analyst/Developer/QA
+четат с `list_repo_files` / `read_repo_file` / `search_repo`; Developer пише с
+`write_repo_file` / `delete_repo_file` и проверява с `get_change_diff`; QA
+преглежда diff-а. Артефактът на Developer е реалният `git diff` (DoD: непразен
+diff, всеки променен `.py` се парсва, ≥1 стъпка от плана е `done`). След QA
+APPROVED и одобрение на портата `publish` `finalize` прави commit → push →
+`gh pr create --draft` за всеки репозиторий с промени (PR тялото съдържа
+тикета, спецификацията, плановете със статуси, матрицата, `run_id`); при
+`JIRA_WRITE_BACK=1` — коментар в тикета с PR линковете. Безопасност: пътищата
+остават в workspace-а (без `..`, абсолютни пътища, symlink-ове, `.git`),
+deny-list за тайни (`.env*`, ключове, сертификати), лимит на размера, бинарни
+файлове не се четат, кодът никога не се изпълнява. Изисква `gh auth login` (и
+`gh auth setup-git`). Без конфигурация UI-ят показва какво липсва и не пуска run.
 
 **Планове преди работа.** Преди Developer възелът `dev_plan` прави план
 за имплементация (критерии за приемане AC-x, стъпки S-x с файлове и
@@ -313,8 +329,6 @@ SKIP_MAIN_GUARD=1 git push ...    # прескача само защитата �
 
 ## Идеи за надграждане
 
-- Реална Jira през Atlassian MCP и draft PR в git репозитории (prod режимът —
-  в ход, виж [docs/prod-mode-plan.md](docs/prod-mode-plan.md)).
 - Добави агент "DevOps", който симулира deploy след одобрение от QA.
 - Дай на QA инструмент, който наистина пуска `pytest` в изолирана среда.
 - Постоянна памет между run-ове (Postgres checkpointer) и контекстна компресия.

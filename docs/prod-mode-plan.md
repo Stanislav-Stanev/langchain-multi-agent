@@ -424,12 +424,12 @@ README.md + README.en.md огледално (§4.2), CHANGELOG `[Unreleased]`, C
   `JIRA_WRITE_BACK` (обвивка `add_comment`, ползвана в PR 3), `.env.example` (Jira), `test_jira_mcp.py`, docs;
   мрежов smoke срещу `mcp.atlassian.com` направен; **ръчната проверка с реален тикет изисква личния API
   token на потребителя** (бутон „Тест на връзката с Jira" + prod run).
-- [ ] **PR 3 — git workspace + draft PR + порта `approve_publish`**: `repo_workspace.py`, `publish.py`,
-  `ProdDoD`, `init_run` prod клон, `approve_publish` (preview на diff/PR body), `finalize` publish,
-  `ui_helpers.py`, UI мултиселект/`publish` събитие, `.env.example` (git), тестове с bare repo + fake gh,
-  prod E2E (вкл. abort на портата → без push), docs; **ръчна проверка**: реален run срещу конфигуриран
-  репозиторий (напр. `Stanislav-Stanev/langchain-multi-agent`) → одобрение на портата → draft PR; при
-  `JIRA_WRITE_BACK=1` — коментар в тикета.
+- [x] **PR 3 — git workspace + draft PR + порта `approve_publish`** — виж
+  `docs/plans/2026-08-26_11-25_pr3-git-workspace-draft-pr.md`: `repo_workspace.py`, `publish.py`, `ProdDoD`,
+  `init_run` prod клон, `approve_publish` (preview на diff/PR body), `finalize` publish, UI мултиселект/`publish`
+  събитие, `.env.example` (git), тестове с реален локален bare repo + fake gh, prod E2E (вкл. abort на портата →
+  без push), docs. **Ръчната проверка** (реален run срещу `Stanislav-Stanev/langchain-multi-agent` с реален Jira
+  тикет → порта → draft PR; `JIRA_WRITE_BACK=1` → коментар) изисква личния Jira API token на потребителя.
 
 ---
 

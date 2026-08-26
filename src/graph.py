@@ -58,6 +58,7 @@ from langgraph.graph import END, START, MessagesState, StateGraph
 from pydantic import BaseModel, Field
 
 from src import plans, step_plans
+from src import publish as publish_module
 from src.agents import create_analyst, create_developer, create_qa
 from src.config import fallback_model_name, get_llm
 from src.dod import (  # noqa: F401 (extract_python_code - публичен API)
@@ -324,10 +325,11 @@ def _criteria_text(plan_doc: dict | None) -> str:
 # _traced (проследяване на диска) се слага само в build_graph().
 
 
-def make_init_run_node(mode: str, runs_root: Path, prepare_workspaces=None):
+def make_init_run_node(mode: str, runs_root: Path, prepare_workspaces=None, repos: list | None = None):
     """
-    init_run (чист код): run_id, run директория, ключ на тикета; в prod -
-    подготовка на git workspace-ите. При resume (run_id вече е в state) е no-op.
+    init_run (чист код): run_id, run директория, ключ на тикета, избраните
+    репозитории; в prod - подготовка на git workspace-ите. При resume (run_id
+    вече е в state) само подготовката се повтаря.
     """
 
     def init_run(state: TeamState, config: RunnableConfig) -> dict:
@@ -349,6 +351,7 @@ def make_init_run_node(mode: str, runs_root: Path, prepare_workspaces=None):
                 "run_dir": str(tracker.run_dir),
                 "mode": mode,
                 "ticket_key": ticket_key,
+                "repos": list(repos or []),
                 "next": "supervisor",
                 "reason": t("route_run_started", run_id=run_id),
             }
@@ -625,13 +628,16 @@ def make_approve_plan_node(enabled: bool):
 
 
 def _publish_gate_payload(state: TeamState) -> dict:
+    """Какво вижда човекът преди publish: diff-ът, присъдата на QA, тест-планът и PR тялото."""
     tracker = RunTracker.from_state(state)
+    diff = state.get("code", "")
     return {
         "title": "code.diff",
         "artifact": str(Path(state.get("run_dir", "")) / "code.diff") if state.get("run_dir") else "",
-        "preview": state.get("code", ""),
+        "preview": f"```diff\n{diff}\n```" if diff else "",
         "qa_verdict": state.get("qa_verdict", {}),
         "test_plan": tracker.read_text(plans.TEST_PLAN_MD),
+        "pr_body": publish_module.build_pr_body(state, tracker),
         "repos": state.get("repos", []),
     }
 
@@ -900,7 +906,9 @@ def build_graph(checkpointer=None, *, mode: str | None = None, repos=None, runs_
 
     # 1. Регистрираме възлите (име -> функция), всеки обвит с проследяването
     nodes = {
-        "init_run": make_init_run_node(mode, runs_root, getattr(ctx, "prepare_workspaces", None)),
+        "init_run": make_init_run_node(
+            mode, runs_root, getattr(ctx, "prepare_workspaces", None), getattr(ctx, "repos", None)
+        ),
         "supervisor": make_supervisor_node(supervisor_llm),
         "analyst": make_analyst_node(worker("analyst"), dod),
         "dev_plan": make_dev_plan_node(plan_llm, dod),

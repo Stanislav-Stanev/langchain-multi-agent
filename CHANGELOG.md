@@ -10,6 +10,24 @@
 
 ## [Unreleased]
 
+### Добавено (Demo / Prod режим — стъпка 3: git workspace и draft PR)
+- **Git workspace в prod режим** (`src/repo_workspace.py`): репозиториите от
+  `PROD_REPOS` (мултиселект в UI-я) се клонират от `PROD_BASE_BRANCH` и всеки
+  run работи на чист branch `multibot/<тикет>-<run>`; инструменти за четене
+  (`list_repo_files`, `read_repo_file`, `search_repo`), писане
+  (`write_repo_file`, `delete_repo_file`) и `get_change_diff`, с path guard
+  (без `..`/абсолютни пътища/symlink/`.git`), deny-list за тайни и лимити.
+  Артефактът на Developer в prod е реалният diff (`ProdDoD`: непразен diff,
+  валидни `.py`, отметната стъпка от плана).
+- **Draft Pull Request** (`src/publish.py`): след QA APPROVED и одобрение на
+  портата `approve_publish` (показва diff, тест-план и PR тялото) `finalize`
+  прави commit → push → `gh pr create --draft` за всеки репозиторий с промени
+  (идемпотентно при съществуващ PR); PR тялото носи тикета, спецификацията,
+  плановете със статуси, матрицата на проследимост и `run_id`; резултатът е
+  `publish_status` (PUBLISHED / PUBLISH_FAILED / SKIPPED_BY_HUMAN) с PR
+  линковете в UI, конзолата и `summary.json`; при `JIRA_WRITE_BACK=1` -
+  коментар в тикета. Тестове с реален локален bare git репозиторий и фалшив `gh`.
+
 ### Добавено (Demo / Prod режим — стъпка 2: Jira през MCP)
 - **Реална Jira в prod режим** през официалния Atlassian Remote MCP Server
   (`src/jira_mcp.py`, пакет `mcp`): Analyst ползва същия инструмент

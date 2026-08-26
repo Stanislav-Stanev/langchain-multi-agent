@@ -150,6 +150,22 @@ STRINGS = {
         "bg": "Run-ът приключи със статус {status}.",
         "en": "The run finished with status {status}.",
     },
+    "route_workspace_ready": {
+        "bg": "Git workspace готов: {repos} на branch {branch}.",
+        "en": "Git workspace ready: {repos} on branch {branch}.",
+    },
+    "route_published": {
+        "bg": "Публикувано: {n} draft Pull Request(а) - run-ът приключи.",
+        "en": "Published: {n} draft Pull Request(s) - the run is complete.",
+    },
+    "route_publish_failed": {
+        "bg": "Публикуването се провали частично или изцяло: {errors}",
+        "en": "Publishing failed partially or fully: {errors}",
+    },
+    "route_publish_skipped": {
+        "bg": "Няма промени за публикуване - draft PR не е създаден.",
+        "en": "No changes to publish - no draft PR was created.",
+    },
     "route_gate_approved": {
         "bg": "Човек одобри на порта '{gate}' - продължаваме.",
         "en": "A human approved at gate '{gate}' - continuing.",
@@ -233,9 +249,28 @@ STRINGS = {
     "ui_jira_test": {"bg": "Тест на връзката с Jira", "en": "Test the Jira connection"},
     "ui_jira_ok": {"bg": "Jira отговаря:\n\n{details}", "en": "Jira responds:\n\n{details}"},
     "ui_jira_error": {"bg": "Jira не отговаря: {error}", "en": "Jira does not respond: {error}"},
-    "ui_prod_git_pending": {
-        "bg": "Git интеграцията (workspace, draft PR) идва в следващата стъпка - в prod Developer/QA засега работят както в demo.",
-        "en": "The git integration (workspace, draft PR) arrives in the next step - in prod Developer/QA work as in demo for now.",
+    "ui_repos": {"bg": "Репозитории (prod)", "en": "Repositories (prod)"},
+    "ui_repos_help": {
+        "bg": "Клонират се от main в WORKSPACE_DIR; Developer променя само нужните файлове; след одобрение - draft PR за всеки променен репозиторий.",
+        "en": "Cloned from main into WORKSPACE_DIR; the Developer changes only the necessary files; after approval - a draft PR per changed repository.",
+    },
+    "ui_gh_status": {"bg": "GitHub CLI (gh): {status}", "en": "GitHub CLI (gh): {status}"},
+    "ui_gh_ok": {"bg": "логнат", "en": "logged in"},
+    "ui_gh_missing": {
+        "bg": "не е логнат - изпълни `gh auth login` (и `gh auth setup-git` за clone/push по https)",
+        "en": "not logged in - run `gh auth login` (and `gh auth setup-git` for https clone/push)",
+    },
+    "ui_publish_done": {
+        "bg": "🚀 **Draft Pull Request** - чака човешко ревю:\n\n{links}",
+        "en": "🚀 **Draft Pull Request** - awaiting human review:\n\n{links}",
+    },
+    "ui_publish_failed": {
+        "bg": "Публикуването не мина изцяло:\n\n{errors}",
+        "en": "Publishing did not fully succeed:\n\n{errors}",
+    },
+    "ui_publish_skipped": {
+        "bg": "Няма промени за публикуване (или човек прекрати публикуването).",
+        "en": "No changes to publish (or a human aborted publishing).",
     },
     "dod_fix_request": {
         "bg": (
@@ -353,6 +388,16 @@ STRINGS = {
     "hitl_summary_line": {
         "bg": "Human-in-the-Loop решения: {n} (виж hitl-decisions.md)",
         "en": "Human-in-the-Loop decisions: {n} (see hitl-decisions.md)",
+    },
+    "repos_line": {"bg": "Репозитории: {repos}", "en": "Repositories: {repos}"},
+    "pr_line": {"bg": "  Draft PR ({repo}): {url}", "en": "  Draft PR ({repo}): {url}"},
+    "publish_status_line": {
+        "bg": "Публикуване: {status}",
+        "en": "Publishing: {status}",
+    },
+    "publish_errors_line": {
+        "bg": "  Грешки при публикуване: {errors}",
+        "en": "  Publishing errors: {errors}",
     },
     "prod_problems_title": {
         "bg": "Prod режимът не може да стартира:",

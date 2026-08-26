@@ -133,10 +133,11 @@ def main() -> None:
         sys.exit(1)
     if mode == "prod":
         from src.jira_mcp import JiraMcpSettings  # lazy: само prod ползва mcp
+        from src.modes import prod_repos
 
         jira = JiraMcpSettings.from_env()
         print(t("jira_line", cloud=jira.cloud_id, auth=jira.auth))
-        print(t("prod_problem_not_available"))
+        print(t("repos_line", repos=", ".join(r.display for r in prod_repos())))
 
     # Сглобяваме графа (виж src/graph.py за архитектурата).
     # С CHECKPOINT_SQLITE_PATH в .env всяка стъпка се записва в SQLite:
@@ -163,6 +164,9 @@ def main() -> None:
     final_status = ""  # APPROVED | ESCALATED | NO_ACTION | ABORTED (от графа)
     run_dir = ""       # директорията с артефактите на run-а
     hitl_count = 0
+    publish_status = ""  # PUBLISHED | PUBLISH_FAILED | SKIPPED* (prod, от finalize)
+    pr_urls: dict = {}
+    publish_errors: list = []
 
     # Callback-ът улавя usage_metadata от ВСЯКО LLM извикване в графа
     # (вкл. супервайзора) и ги сумира по модел - за отчета накрая.
@@ -220,6 +224,10 @@ def main() -> None:
                             print(t("plan_file_line", name=name, path=str(Path(run_dir) / name)))
                         if update.get("hitl_decisions"):
                             hitl_count = len(update["hitl_decisions"])
+                        if update.get("publish_status"):
+                            publish_status = update["publish_status"]
+                            pr_urls = update.get("pr_urls") or {}
+                            publish_errors = update.get("publish_errors") or []
                         # Детерминистичният преход на възела (следваща стъпка + защо):
                         # всеки възел записва next/reason в състоянието.
                         if update.get("next"):
@@ -271,6 +279,12 @@ def main() -> None:
     print(t("steps_line", steps=step_no, tools=tool_calls_count))
     if hitl_count:
         print(t("hitl_summary_line", n=hitl_count))
+    if publish_status:
+        print(t("publish_status_line", status=publish_status))
+        for repo, url in pr_urls.items():
+            print(t("pr_line", repo=repo, url=url))
+        if publish_errors:
+            print(t("publish_errors_line", errors="; ".join(publish_errors)))
     print(t("tokens_title"))
     total_cost = 0.0
     if usage_cb.usage_metadata:

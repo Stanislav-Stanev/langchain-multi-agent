@@ -160,3 +160,40 @@ class TestQaAgent:
             "check_code_syntax",
             "run_test_checklist",
         }
+
+
+class TestToolInjectionAndAddenda:
+    """Режимите подават инструментите и добавката към промпта като аргументи."""
+
+    def test_explicit_tools_replace_the_defaults(self, monkeypatch):
+        from src.plans import make_plan_tools
+
+        plan_tool, _ = make_plan_tools()
+        model = install_model(monkeypatch, [AIMessage(content="край")])
+        agent = agents_module.create_developer(tools=[plan_tool])
+        agent.invoke({"messages": [HumanMessage(content="х")]})
+        assert [t.name for t in model.bound_tools] == ["update_plan_step"]
+
+    def test_prompt_addendum_is_appended_to_the_system_prompt(self, monkeypatch):
+        model = install_model(monkeypatch, [AIMessage(content="край")])
+        agent = agents_module.create_qa(prompt_addendum="ДОБАВКА-МАРКЕР")
+        agent.invoke({"messages": [HumanMessage(content="х")]})
+        system_text = str(model.received[0][0].content)
+        assert system_text.startswith("Ти си QA инженер") and system_text.endswith("ДОБАВКА-МАРКЕР")
+
+    def test_agents_accept_run_context(self, monkeypatch):
+        # context_schema=RunCtx: agent.invoke(..., context=RunCtx) не гърми
+        from src.run_context import RunCtx
+
+        install_model(monkeypatch, [AIMessage(content="ок")])
+        agent = agents_module.create_analyst()
+        result = agent.invoke(
+            {"messages": [HumanMessage(content="х")]},
+            context=RunCtx(run_id="r", run_dir="", mode="demo"),
+        )
+        assert result["messages"][-1].content == "ок"
+
+    def test_base_prompts_mention_plan_tools(self):
+        for lang in ("bg", "en"):
+            assert "update_plan_step" in agents_module.DEVELOPER_PROMPTS[lang]
+            assert "update_test_case" in agents_module.QA_PROMPTS[lang]

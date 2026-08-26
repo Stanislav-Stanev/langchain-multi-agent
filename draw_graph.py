@@ -19,6 +19,9 @@ import sys
 # а Anthropic клиентът иска ключ при конструиране. Затова за целите
 # на чертането подаваме фиктивен ключ, ако няма истински.
 os.environ.setdefault("ANTHROPIC_API_KEY", "not-needed-for-drawing")
+# Структурата на графа е една и съща в двата режима; demo не изисква Jira /
+# git конфигурация, затова чертаем него.
+os.environ.setdefault("APP_MODE", "demo")
 
 from src.graph import build_graph
 

@@ -10,6 +10,33 @@
 
 ## [Unreleased]
 
+### Добавено (Demo / Prod режим — стъпка 1)
+- **Режими** `APP_MODE=prod|demo` (по подразбиране prod; дропдаун в
+  Streamlit): demo е учебният режим с примерните тикети; prod е избираем,
+  а интеграциите му (Jira през Atlassian MCP, git репозитории, draft PR)
+  идват в следващите стъпки от `docs/prod-mode-plan.md` — без конфигурация
+  UI-ят показва какво липсва и не пуска run.
+- **Планове преди работа**: възел `dev_plan` (план за имплементация —
+  критерии за приемане, стъпки с файлове) преди Developer и `qa_plan`
+  (тест-план по критериите) преди QA — структуриран LLM изход, JSON като
+  източник на истина, markdown с чекбоксове; агентите отчитат прогреса с
+  инструментите `update_plan_step` / `update_test_case`; при rework планът
+  получава секция „Rework N"; матрица на проследимост в `traceability.md`.
+- **Human-in-the-Loop порти** (`HITL_GATES`): `approve_plan` (одобрение
+  на плана: одобри / поискай промени с указания / прекрати),
+  `approve_publish` (преди публикуване в prod) и `escalation_gate`
+  (при DoD провал или изчерпан rework лимит: повторен опит с указания или
+  край) — LangGraph `interrupt()` + `Command(resume=...)`; конзолата пита
+  интерактивно, UI-ят показва панел с бутони; `HITL_AUTO_APPROVE=1` за CI.
+- **Проследяване на run-а** в `runs/<дата_час>_<тикет>/`: план преди и
+  изпълнение след всяка стъпка (`steps/NN-<възел>.md`, `index.md`),
+  `STATUS.md`, `run.jsonl`, артефактите на фазите, `hitl-decisions.md`,
+  `summary.json` (вкл. токени/цена); нови модули `src/modes.py`,
+  `src/plans.py`, `src/hitl.py`, `src/dod.py`, `src/toolsets.py`,
+  `src/run_tracker.py`, `src/step_plans.py`, `src/run_context.py`.
+- Тестове за всичко горе (унит, интеграционни, E2E с HITL през
+  `InMemorySaver`); `docs/plans/` — план преди всяка стъпка от имплементацията.
+
 ### Променено
 - Системата е преименувана на **Multi-Bot** (заглавия в UI и конзолата,
   документация).

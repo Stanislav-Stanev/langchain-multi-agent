@@ -14,7 +14,10 @@ from langchain_core.messages import HumanMessage
 from langgraph.graph import END
 from pydantic import ValidationError
 
+from src import plans as plans_module
 from src.graph import (
+    ENTRY_NODE,
+    PIPELINE,
     SUPERVISOR_PROMPTS,
     WORKERS,
     QAVerdict,
@@ -29,6 +32,7 @@ from src.graph import (
     max_rework,
     route_next,
 )
+from src.plans import ImplementationPlan
 from tests.conftest import FakeWorkerAgent, _ScriptedLLM, decide, verdict
 
 
@@ -144,6 +148,15 @@ class TestSupervisorNode:
         node = make_supervisor_node(_ScriptedLLM([decide("FINISH")]))
         update = node({"messages": [HumanMessage(content="времето утре?")]})
         assert update["final_status"] == "NO_ACTION"
+        assert update["next"] == "finalize"
+
+    @pytest.mark.parametrize(
+        "decision,entry", [("analyst", "analyst"), ("developer", "dev_plan"), ("qa", "qa_plan")]
+    )
+    def test_entry_points_go_through_the_plans(self, decision, entry):
+        # Планът предхожда работата при ВСЕКИ вход: developer -> dev_plan, qa -> qa_plan
+        node = make_supervisor_node(_ScriptedLLM([decide(decision)]))
+        assert node({"messages": []})["next"] == entry == ENTRY_NODE[decision]
 
     def test_prepends_system_prompt_in_current_language(self, monkeypatch):
         llm = _ScriptedLLM([decide("FINISH")])
@@ -163,7 +176,7 @@ class TestAnalystNode:
         update = node({"messages": [HumanMessage(content="задача")]})
 
         assert update["spec"] == "Спецификация готова."
-        assert update["next"] == "developer"
+        assert update["next"] == "dev_plan"  # планът предхожда Developer
         (msg,) = update["messages"]
         assert isinstance(msg, HumanMessage) and msg.name == "analyst"
 
@@ -185,7 +198,8 @@ class TestAnalystNode:
         assert first["dod_retries"] == {"analyst": 1}
 
         second = node({"messages": [], "dod_retries": first["dod_retries"]})
-        assert second["next"] == "FINISH"           # после ескалация
+        assert second["next"] == "escalation_gate"  # после ескалация (човек решава)
+        assert second["retry_target"] == "analyst"
         assert second["final_status"] == "ESCALATED"
 
 
@@ -195,6 +209,14 @@ class TestDeveloperNode:
         update = make_developer_node(FakeWorkerAgent([answer]))({"messages": []})
 
         assert update["code"] == "def f() -> int:\n    return 1"
+        assert update["next"] == "qa_plan"  # тест-планът предхожда QA
+
+    def test_routes_directly_to_qa_when_test_plan_exists(self):
+        # При rework тест-планът вече съществува - без второ планиране
+        answer = "```python\ndef f() -> int:\n    return 1\n```"
+        update = make_developer_node(FakeWorkerAgent([answer]))(
+            {"messages": [], "test_plan": {"cases": [{"id": "T1"}]}}
+        )
         assert update["next"] == "qa"
 
     def test_missing_code_block_fails_dod(self):
@@ -220,7 +242,7 @@ class TestQaNode:
         node, _ = self._node([verdict("APPROVED")])
         update = node({"messages": []})
 
-        assert update["next"] == "FINISH"
+        assert update["next"] == "approve_publish"  # портата преди публикуване, после finalize
         assert update["final_status"] == "APPROVED"
         assert update["qa_verdict"] == {"status": "APPROVED", "issues": []}
 
@@ -237,7 +259,8 @@ class TestQaNode:
         node, _ = self._node([verdict("NEEDS_WORK")])
         update = node({"messages": [], "rework_count": 2})  # лимитът е изчерпан
 
-        assert update["next"] == "FINISH"
+        assert update["next"] == "escalation_gate"
+        assert update["retry_target"] == "developer"
         assert update["final_status"] == "ESCALATED"
 
     def test_verdict_llm_gets_the_report_text(self):
@@ -319,22 +342,31 @@ class TestGraphStructure:
         h = scripted_graph()
         g = h.graph.get_graph()
 
-        assert set(g.nodes) == {"__start__", "supervisor", "analyst", "developer", "qa", "__end__"}
+        assert set(g.nodes) == {"__start__", "init_run", "supervisor", *PIPELINE, "__end__"}
 
         edges = {(e.source, e.target) for e in g.edges}
-        assert ("__start__", "supervisor") in edges          # входна точка
-        # Детерминистичният конвейер + rework цикълът
+        assert ("__start__", "init_run") in edges            # входна точка: регистрация на run-а
+        assert ("init_run", "supervisor") in edges           # после triage
+        # Детерминистичният конвейер с плановете, портите и rework цикълът
         assert ("supervisor", "analyst") in edges            # triage вход
-        assert ("analyst", "developer") in edges             # spec -> код
-        assert ("developer", "qa") in edges                  # код -> преглед
+        assert ("analyst", "dev_plan") in edges              # spec -> план
+        assert ("dev_plan", "approve_plan") in edges         # план -> човек
+        assert ("approve_plan", "developer") in edges        # одобрен план -> код
+        assert ("developer", "qa_plan") in edges             # код -> тест-план
+        assert ("qa_plan", "qa") in edges                    # тест-план -> преглед
         assert ("qa", "developer") in edges                  # NEEDS_WORK цикълът
-        assert ("qa", "__end__") in edges                    # APPROVED/ESCALATED
+        assert ("qa", "approve_publish") in edges            # APPROVED -> порта преди публикуване
+        assert ("approve_publish", "finalize") in edges
+        assert ("qa", "escalation_gate") in edges            # rework лимит -> човек
+        assert ("finalize", "__end__") in edges              # единственият изход
 
     def test_llm_factories_receive_structured_schemas(self, scripted_graph):
         h = scripted_graph()
-        # build_graph() трябва да е поискал точно двете схеми
+        # build_graph() трябва да е поискал точно четирите схеми
         assert h.supervisor.requested_schema is SupervisorDecision
         assert h.verdicts.requested_schema is QAVerdict
+        assert h.plans.requested_schema is ImplementationPlan
+        assert h.test_plans.requested_schema is plans_module.TestPlan
 
     def test_no_llm_objects_at_module_level(self):
         # Контракт: src.graph НЯМА LLM-зависим код на ниво модул -
@@ -347,7 +379,10 @@ class TestGraphStructure:
         import src.graph as graph_module
 
         tree = ast_module.parse(inspect.getsource(graph_module))
-        forbidden = {"build_graph", "get_llm", "create_analyst", "create_developer", "create_qa"}
+        forbidden = {
+            "build_graph", "get_llm", "create_analyst", "create_developer", "create_qa",
+            "make_tools", "make_mode_context",
+        }
         module_level_calls = {
             node.value.func.id
             for node in tree.body

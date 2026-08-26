@@ -14,38 +14,54 @@ requirement in a ticket to reviewed and approved code.
 ## Architecture — the "Supervisor" pattern
 
 ```
-                       +--------------+
-             user ---> |  SUPERVISOR  | <--- returns after every agent
-                       | (Team Lead)  |
-                       +--------------+
-                        /      |      \
-                       v       v       v
-                 +---------+ +-----------+ +--------+
-                 | ANALYST | | DEVELOPER | |   QA   |
-                 +---------+ +-----------+ +--------+
-                requirements  writes code   review
+       user -> init_run -> SUPERVISOR (one-time triage)
+                              |
+   ANALYST -> dev_plan -> [approve_plan] -> DEVELOPER -> qa_plan -> QA
+ requirements  plan          human         writes code  test plan  review
+                 ^ "changes"                    ^                    |
+                 +------------------------------+---- NEEDS_WORK ----+
+                                                                     v
+                                          [approve_publish] -> finalize -> END
+   DoD failure / rework limit -> [escalation_gate] -> retry with guidance | stop
+   [ ... ] = Human-in-the-Loop gate (pauses and waits for a human)
 ```
 
-| Agent          | SDLC phase     | Tools                                     |
-|----------------|----------------|-------------------------------------------|
-| **Supervisor** | management     | none — only decides who works next        |
-| **Analyst**    | Requirements   | `get_ticket_details` (mock Jira)          |
-| **Developer**  | Implementation | `get_coding_standards` (company rules)    |
-| **QA**         | Testing/Review | `check_code_syntax`, `run_test_checklist` |
+| Node / agent        | SDLC phase     | What it does                                                         |
+|---------------------|----------------|----------------------------------------------------------------------|
+| `init_run`          | —              | code: folder `runs/<date_time>_<ticket>/`, ticket key                 |
+| **Supervisor**      | management     | LLM: one-time triage — where the task enters (or FINISH)              |
+| **Analyst**         | Requirements   | agent: specification; `get_ticket_details` (mock Jira / Jira in prod) |
+| `dev_plan`          | Planning       | LLM (structured): implementation plan with checkboxes                 |
+| `approve_plan`      | —              | a **human** approves the plan / requests changes / aborts             |
+| **Developer**       | Implementation | agent: code; `get_coding_standards`, `update_plan_step` (progress)    |
+| `qa_plan`           | Test planning  | LLM (structured): test plan per acceptance criterion                  |
+| **QA**              | Testing/Review | agent: `check_code_syntax`, `run_test_checklist`, `update_test_case`  |
+| `approve_publish`   | —              | a **human** approves publishing (prod: commit / push / draft PR)      |
+| `escalation_gate`   | —              | a **human** on escalation: retry with guidance or stop                |
+| `finalize`          | —              | code: traceability matrix, `summary.json`, publishing (prod)          |
 
-The flow is **analyst → developer → qa → FINISH**. The Supervisor (an
-LLM) performs only a **one-time triage** — where the task enters (or
-FINISH for a non-software task); everything after that is
-**deterministic code** over typed artifacts (spec, code, QA verdict),
-not LLM decisions:
+The Supervisor (an LLM) performs only a **one-time triage** — where the
+task enters; `dev_plan`/`qa_plan` each make one **structured** LLM call
+(the plan is content — the model decides it; the format and the progress
+are code). Everything else is **deterministic code** over typed
+artifacts (spec, plan, code, test plan, QA verdict):
 
 - every phase has a **Definition of Done** checked by code (non-empty
-  spec, extracted and syntactically valid code) — a missed DoD gives
-  the agent one retry, then escalates to a human;
+  spec, a plan with steps, extracted and syntactically valid code) — a
+  missed DoD gives the agent one retry, then **escalates to a human**
+  (`escalation_gate`);
 - the QA verdict is **structured** (`QAVerdict`, Pydantic) — on
-  `NEEDS_WORK` the task goes back to the Developer, but at most
-  `MAX_REWORK` times (default 3), then `ESCALATED` instead of an
-  endless loop;
+  `NEEDS_WORK` the task goes back to the Developer (the plan gets a
+  "Rework N" section with the issues, no re-planning), but at most
+  `MAX_REWORK` times (default 3), then escalation instead of an endless loop;
+- **Human-in-the-Loop** — the gates `plan`, `publish`, `escalation`
+  (`HITL_GATES`) pause the graph with `interrupt()` and wait for a
+  decision: approve / request changes (with guidance) / abort; every
+  decision is recorded;
+- **traceability** — every run leaves a folder `runs/<date_time>_<ticket>/`
+  with a plan before and the execution after **every step**
+  (`steps/NN-<node>.md`), the plans with checkboxes, `STATUS.md`, a journal,
+  a traceability matrix and `summary.json` (see [Modes, plans and Human-in-the-Loop](#modes-plans-and-human-in-the-loop));
 - optional: a different model per role (`MODEL_SUPERVISOR`, ...), a
   hard per-run budget limit (`MAX_COST_USD_PER_RUN`), a fallback model
   when the primary fails (`MODEL_FALLBACK`), and **checkpointing** into
@@ -71,18 +87,30 @@ langchain-multi-agent/
 ├── .githooks/
 │   ├── pre-commit       # hook: protects main from direct commits
 │   └── pre-push         # hook: protects main + Claude syncs docs/changelog
+├── docs/
+│   ├── prod-mode-plan.md    # the plan for the Demo/Prod mode, HITL and tracing
+│   └── plans/               # a plan before every implementation step (date_time)
 ├── src/
 │   ├── config.py        # settings + LLM client factory (anthropic/ollama)
+│   ├── modes.py         # demo/prod modes (APP_MODE), repositories, prod validation
 │   ├── i18n.py          # bilingual texts (bg/en) + t() helper
 │   ├── tools.py         # the tools (mock Jira, linter, QA checklist)
+│   ├── toolsets.py      # which tools each role gets per mode
+│   ├── plans.py         # Developer/QA plans: schemas, checkboxes, progress
+│   ├── dod.py           # Definition of Done policies (demo / prod)
+│   ├── hitl.py          # Human-in-the-Loop gates (interrupt + decision)
+│   ├── run_tracker.py   # runs/<date_time>_<ticket>/ - journal, steps, status
+│   ├── step_plans.py    # the "plan before / execution after" templates per step
+│   ├── run_context.py   # RunCtx - the run context for the tools
 │   ├── agents.py        # the three worker agents (ReAct)
-│   └── graph.py         # supervisor + LangGraph graph assembly
+│   └── graph.py         # supervisor + plans + gates + graph assembly
+├── runs/                # (git-ignored) the artifacts of every run
 └── tests/               # pytest suite — the full workflow, no real LLM calls
     └── evals/           # golden evals with a REAL LLM (run explicitly)
 ```
 
 Recommended reading order for learning:
-`tools.py` → `agents.py` → `graph.py` → `main.py`
+`tools.py` → `agents.py` → `plans.py` → `hitl.py` → `graph.py` → `main.py`
 
 ## Installation and running
 
@@ -99,17 +127,69 @@ pip install -r requirements.txt
 copy .env.example .env        # Windows (cp on Linux/macOS)
 # edit .env: add your key from https://platform.claude.com/
 # and set APP_LANG=en for an English interface
+# APP_MODE=prod is the default; for the teaching mode set APP_MODE=demo
 
-# 4. Run with the demo task (ticket DEV-101)
-python main.py
+# 4. Run with the demo task (ticket DEV-101) - in demo mode
+python main.py                # (PowerShell: $env:APP_MODE="demo"; python main.py)
+# the graph pauses at the approve_plan gate and waits: [a] approve / [r: guidance] / [q]
 
 # ...or with your own task
 python main.py "Implement ticket DEV-102"
 python main.py "Write a function that reverses a string"
 
-# Web UI (language and provider switches in the sidebar)
+# Web UI (language, provider, mode and Human-in-the-Loop gates in the sidebar)
 streamlit run app.py
+
+# The run's artifacts: runs/<date_time>_DEV-101/ (plans, steps, STATUS.md)
 ```
+
+## Modes, plans and Human-in-the-Loop
+
+**Mode** (`APP_MODE`, a dropdown in the UI; default **prod**):
+
+| | demo | prod |
+|---|------|------|
+| Tickets | the sample DEV-101 / DEV-102 (`src/tools.py`) | real Jira via the official Atlassian MCP server *(next step)* |
+| Code | a ```python block in the Developer's answer | changes in cloned git repositories → draft PR *(next step)* |
+| Plans, steps, HITL | yes | yes |
+
+In this version prod mode is selectable, but its integrations (Jira MCP,
+git workspace, draft PR) arrive in the next steps of
+[docs/prod-mode-plan.md](docs/prod-mode-plan.md) — without configuration
+the UI shows what is missing and does not start a run.
+
+**Plans before work.** Before the Developer the `dev_plan` node produces
+an implementation plan (acceptance criteria AC-x, steps S-x with files and
+covered criteria); before QA the `qa_plan` node produces a test plan
+(cases T-x ↔ criteria). The plan is a Pydantic object (structured output),
+JSON is the source of truth, and the markdown with checkboxes is
+re-rendered on every change. The agents report progress with the tools
+`update_plan_step` / `update_test_case` (`- [ ]` → `- [~]` → `- [x]`); on
+rework the plan gets a "Rework N" section and the test plan is reset for a
+new run. `finalize` writes a traceability matrix criterion ↔ steps ↔ test
+cases ↔ result.
+
+**A plan before every step.** Every node leaves `steps/NN-<node>.md` — a
+"Plan" section (goal, inputs, scope, DoD) written *before* execution and an
+"Execution" section (result, artifacts, DoD, decision) added *after* it;
+`index.md` and `STATUS.md` are refreshed after every step. The run folder
+is `runs/<YYYY-MM-DD_HH-MM-SS>_<ticket>/` (`RUNS_DIR`).
+
+**Human-in-the-Loop** (`HITL_GATES`; prod: `plan,publish,escalation`,
+demo: `plan,escalation`; empty = no gates):
+
+| Gate | Where | Decisions |
+|------|-------|-----------|
+| `plan` | after the plan, before the Developer | approve → Developer; changes (with guidance) → re-plan (up to `HITL_MAX_REVISIONS`); abort → `ABORTED` |
+| `publish` | after QA APPROVED, before publishing (prod) | approve → commit/push/PR; changes → Developer; abort → no publishing |
+| `escalation` | on a DoD failure / exhausted rework limit | retry (with guidance, counters reset) → the same node; abort → `ESCALATED` |
+
+The gates are separate nodes with LangGraph `interrupt()` (they need a
+checkpointer — without `CHECKPOINT_SQLITE_PATH` an `InMemorySaver` is used).
+The console asks `[a]/[r: text]/[q]`; without an interactive console
+`HITL_AUTO_APPROVE=1` approves (and records it). The UI shows the artifact
+with Approve / Request changes / Abort buttons. All decisions are in
+`hitl-decisions.md`.
 
 ## Tests
 
@@ -118,12 +198,17 @@ The project has a pytest suite (`tests/`) covering the full workflow
 replaced with scripted test doubles, so the tests are fast, free and
 deterministic:
 
-- **unit tests** — the tools, i18n, config, the graph's building blocks;
+- **unit tests** — the tools, i18n, config, the modes, the plans, the
+  tracing (in `tmp_path`), the DoD policies, the HITL mechanism, the
+  graph's building blocks;
 - **integration** — the real ReAct agents (`create_agent`) + the real
-  mock tools, driven by a fake tool-calling model;
+  tools (incl. `update_plan_step` via `ToolRuntime`), driven by a fake
+  tool-calling model;
 - **E2E workflow** — the real graph: the happy path, the rework loop
   and its limit, Definition of Done (retry + escalation), the triage
-  entries, the streaming contract and the bilingual texts;
+  entries, the on-disk artifacts, the Human-in-the-Loop gates (interrupt
+  → approve / revise / abort → resume), the streaming contract and the
+  bilingual texts;
 - **evals** (`tests/evals/`) — the quality of the REAL LLM decisions:
   a golden dataset (versioned YAML in the repo) + LLM-as-judge through
   the same `get_llm()`. Excluded from the default run (real costs!) —
@@ -214,11 +299,17 @@ SKIP_MAIN_GUARD=1 git push ...    # skips only the main guard (hotfix)
 7. **Safeguards** — `recursion_limit` against infinite loops; tools
    return error messages instead of raising exceptions; code is checked
    with `ast.parse` **without being executed** (security!).
+8. **Planning before acting** — the plan is structured output, the
+   progress is code (JSON → markdown with checkboxes), a traceability matrix.
+9. **Human-in-the-Loop** — `interrupt()` in separate nodes where a
+   decision is expensive or irreversible; resume with `Command(resume=...)`.
+10. **Audit trail** — every step leaves a plan and a result on disk;
+    after the run its folder is the full story of what happened and why.
 
 ## Ideas for extending
 
-- Replace the mock tickets with a real Jira/GitHub API.
+- Real Jira via the Atlassian MCP server and draft PRs in git repositories
+  (the prod mode — in progress, see [docs/prod-mode-plan.md](docs/prod-mode-plan.md)).
 - Add a "DevOps" agent that simulates a deploy after QA approval.
 - Give QA a tool that actually runs `pytest` in an isolated environment.
-- Add memory (a LangGraph checkpointer) to continue conversations.
-- Visualize the graph: `build_graph().get_graph().draw_mermaid()`.
+- Persistent memory across runs (a Postgres checkpointer) and context compression.

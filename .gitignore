@@ -15,3 +15,10 @@ venv/
 
 # Checkpointer бази (CHECKPOINT_SQLITE_PATH) - локално състояние на run-ове
 *.sqlite
+
+# Артефакти на run-овете (планове, стъпки, статус) и локални клонове (prod)
+runs/
+workspace/
+
+# Ruff cache
+.ruff_cache/

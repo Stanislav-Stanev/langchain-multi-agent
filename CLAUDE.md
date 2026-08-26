@@ -10,6 +10,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Bilingual (bg/en):** all user-facing strings live in `src/i18n.py` (`t("key")`, language from `APP_LANG` env, `bg` default) — never add user-facing literals directly in `main.py`/`app.py`; add a key to `STRINGS` with **both** languages (import-time validation fails on half-translated keys). Agent prompts (`agents.py`, `graph.py`) and mock tool data (`tools.py`) are per-language dicts. Prompts are fixed at `build_graph()` time (language is part of the Streamlit graph cache key); tool texts resolve at call time. Docs are mirrored: `README.md` (bg) ↔ `README.en.md` (en) — edits to one must be mirrored in the other. Code comments stay Bulgarian-only by design.
 
+## Plan first — always (project rule)
+
+**Never start implementing a change in this repo without a plan in a Markdown file.** Before writing code:
+
+1. Write `docs/plans/<YYYY-MM-DD_HH-MM>_<short-slug>.md` (Bulgarian, like the existing ones). Structure: `Статус` line (PLANNED → IN_PROGRESS → DONE, start/end time, link to the master plan if any) → **Цел** → **Контекст / входове** (verified facts, constraints) → **Обхват / Не-обхват** → **Стъпки** as checkboxes with a done-criterion in parentheses → **Рискове / допускания** → **Definition of Done** → **Изпълнение** (empty at first).
+2. Larger initiatives (several PRs) also get a master plan in `docs/` (e.g. `docs/prod-mode-plan.md`: context, decisions table, architecture, file-by-file changes, env, i18n, tests, docs, PR sequence with checkboxes, verification) and each PR's step plan links back to it.
+3. While working, tick the checkboxes and append timestamped notes to **Изпълнение**: what was done, every deviation from the plan and why, bugs found by real runs, what remains for the user. The plan file is committed with the change — it is the audit trail of the work, the same "plan before / record after" discipline the agents themselves follow (`runs/<run>/steps/`).
+4. Trivial edits (typo, one-line fix) may skip the file, but anything touching graph/agents/tools/UI behavior, tests or docs structure must have one.
+
 ## Commands
 
 Windows + PowerShell project. Use the venv executables directly (no activation needed):

@@ -67,7 +67,7 @@ def judge(question: str, artifact: str) -> JudgeScore:
 def test_golden_case(case_path):
     case = yaml.safe_load(case_path.read_text(encoding="utf-8"))
 
-    graph = build_graph()
+    graph = build_graph(mode="demo")  # evals ползват mock тикетите, никога реална Jira
     state = graph.invoke(
         {"messages": [HumanMessage(content=case["task"])]},
         config={"recursion_limit": 25},

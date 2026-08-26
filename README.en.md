@@ -102,9 +102,13 @@ langchain-multi-agent/
 │   ├── run_tracker.py   # runs/<date_time>_<ticket>/ - journal, steps, status
 │   ├── step_plans.py    # the "plan before / execution after" templates per step
 │   ├── run_context.py   # RunCtx - the run context for the tools
+│   ├── jira_mcp.py      # prod: Jira via the official Atlassian MCP server
+│   ├── repo_workspace.py# prod: git workspace + read/write tools
+│   ├── publish.py       # prod: commit -> push -> draft PR (+ Jira comment)
 │   ├── agents.py        # the three worker agents (ReAct)
 │   └── graph.py         # supervisor + plans + gates + graph assembly
 ├── runs/                # (git-ignored) the artifacts of every run
+├── workspace/           # (git-ignored) the local clones of the repositories (prod)
 └── tests/               # pytest suite — the full workflow, no real LLM calls
     └── evals/           # golden evals with a REAL LLM (run explicitly)
 ```
@@ -150,8 +154,8 @@ streamlit run app.py
 | | demo | prod |
 |---|------|------|
 | Tickets | the sample DEV-101 / DEV-102 (`src/tools.py`) | **real Jira** via the official Atlassian Remote MCP Server (`src/jira_mcp.py`) |
-| Code | a ```python block in the Developer's answer | changes in cloned git repositories → draft PR *(next step)* |
-| Plans, steps, HITL | yes | yes |
+| Code | a ```python block in the Developer's answer | **real changes in cloned git repositories** (`src/repo_workspace.py`) → **draft Pull Request** (`src/publish.py`) |
+| Plans, steps, HITL | yes | yes (+ the `publish` gate before push) |
 
 **Jira via MCP (prod).** The Analyst uses the same `get_ticket_details` tool,
 but behind it is the official Atlassian MCP server (`https://mcp.atlassian.com/v1/mcp`):
@@ -165,10 +169,22 @@ The Analyst also gets `search_tickets(jql)` for tasks without a key (JQL always 
 Errors come back as text, transport errors are retried with backoff; the `mcp`
 package is imported only in prod. The UI has a "Test the Jira connection" button.
 
-The git integration (workspace, draft PR) arrives in the next step of
-[docs/prod-mode-plan.md](docs/prod-mode-plan.md) — until then, in prod the
-Developer/QA work as in demo. Without configuration the UI shows what is
-missing and does not start a run.
+**Git workspace and draft PR (prod).** `PROD_REPOS` (owner/name or GitHub URL,
+comma-separated; a multiselect in the UI) are cloned from `PROD_BASE_BRANCH` into
+`WORKSPACE_DIR` and every run starts on a clean branch `multibot/<ticket>-<run>`.
+Analyst/Developer/QA read with `list_repo_files` / `read_repo_file` /
+`search_repo`; the Developer writes with `write_repo_file` / `delete_repo_file`
+and verifies with `get_change_diff`; QA reviews the diff. The Developer's
+artifact is the real `git diff` (DoD: non-empty diff, every changed `.py`
+parses, ≥1 plan step is `done`). After QA APPROVED and approval at the
+`publish` gate, `finalize` does commit → push → `gh pr create --draft` for
+every repository with changes (the PR body carries the ticket, the spec, the
+plans with statuses, the matrix, the `run_id`); with `JIRA_WRITE_BACK=1` — a
+comment on the ticket with the PR links. Safety: paths stay inside the
+workspace (no `..`, absolute paths, symlinks, `.git`), a deny-list for secrets
+(`.env*`, keys, certificates), a size limit, binary files are not read, code is
+never executed. Requires `gh auth login` (and `gh auth setup-git`). Without
+configuration the UI shows what is missing and does not start a run.
 
 **Plans before work.** Before the Developer the `dev_plan` node produces
 an implementation plan (acceptance criteria AC-x, steps S-x with files and
@@ -320,8 +336,6 @@ SKIP_MAIN_GUARD=1 git push ...    # skips only the main guard (hotfix)
 
 ## Ideas for extending
 
-- Real Jira via the Atlassian MCP server and draft PRs in git repositories
-  (the prod mode — in progress, see [docs/prod-mode-plan.md](docs/prod-mode-plan.md)).
 - Add a "DevOps" agent that simulates a deploy after QA approval.
 - Give QA a tool that actually runs `pytest` in an isolated environment.
 - Persistent memory across runs (a Postgres checkpointer) and context compression.

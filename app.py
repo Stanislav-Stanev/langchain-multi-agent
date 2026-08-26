@@ -42,7 +42,7 @@ from src.config import (
 from src.graph import build_graph, extract_text
 from src.hitl import GATES, default_gates
 from src.i18n import SUPPORTED_LANGS, t
-from src.modes import MODES, validate_prod_config
+from src.modes import MODES, prod_repos, validate_prod_config
 from src.run_tracker import RunTracker
 
 load_dotenv()
@@ -130,14 +130,21 @@ with st.sidebar:
     )
     os.environ["HITL_GATES"] = ",".join(selected_gates)
 
-    # Prod предварителни условия / demo подсказка
-    problems = validate_prod_config(mode)
+    # Prod: репозитории (мултиселект, по подразбиране всички), Jira/gh статус;
+    # demo: подсказка. Тук сме извън run-цикъла - директните st.* са наред.
+    selected_repos: tuple = ()
+    if mode == "prod":
+        _all_repos = [r.display for r in prod_repos()]
+        if _all_repos:
+            selected_repos = tuple(
+                st.multiselect(t("ui_repos"), _all_repos, default=_all_repos, help=t("ui_repos_help"))
+            )
+    problems = validate_prod_config(mode, list(selected_repos) if mode == "prod" else None)
     if mode == "prod" and problems:
         st.error(t("ui_prod_config_error", problems="\n".join(f"- {p}" for p in problems)))
     elif mode == "prod":
-        # Jira през Atlassian MCP: сайт + автентикация, и бутон за проверка на връзката.
-        # Тук сме извън run-цикъла, затова директните st.* извиквания са наред.
         from src.jira_mcp import JiraMcpClient, JiraMcpError, JiraMcpSettings
+        from src.publish import GhPublisher
 
         _jira_settings = JiraMcpSettings.from_env()
         st.caption(t("ui_jira_status", cloud=_jira_settings.cloud_id, auth=_jira_settings.auth))
@@ -147,7 +154,8 @@ with st.sidebar:
                 st.success(t("ui_jira_ok", details=details))
             except (JiraMcpError, Exception) as exc:  # noqa: BLE001 - показваме всяка грешка в UI-я
                 st.error(t("ui_jira_error", error=exc))
-        st.info(t("ui_prod_git_pending"))
+            gh_ok, _ = GhPublisher().auth_status()
+            st.caption(t("ui_gh_status", status=t("ui_gh_ok") if gh_ok else t("ui_gh_missing")))
     if mode == "demo":
         st.info(t("ui_demo_hint"))
 
@@ -160,15 +168,20 @@ os.environ["LLM_PROVIDER"] = provider
 
 
 @st.cache_resource(show_spinner="⏳")
-def get_graph(provider_key: str, lang_key: str, mode_key: str, gates_key: tuple):
-    """Кешира по един компилиран граф на (доставчик, език, режим, порти) -
-    промптовете на агентите се фиксират при сглобяване, затова езикът и
-    режимът са част от ключа. С CHECKPOINT_SQLITE_PATH графът пази всяка
-    стъпка в SQLite (resume); иначе при включени порти - InMemorySaver."""
+def get_graph(provider_key: str, lang_key: str, mode_key: str, gates_key: tuple, repos_key: tuple):
+    """Кешира по един компилиран граф на (доставчик, език, режим, порти,
+    репозитории) - промптовете на агентите се фиксират при сглобяване, затова
+    езикът и режимът са част от ключа. С CHECKPOINT_SQLITE_PATH графът пази
+    всяка стъпка в SQLite (resume); иначе при включени порти - InMemorySaver."""
     os.environ["LLM_PROVIDER"] = provider_key
     os.environ["APP_LANG"] = lang_key
     os.environ["APP_MODE"] = mode_key
-    return build_graph(checkpointer=get_checkpointer(), mode=mode_key, hitl_gates=gates_key)
+    return build_graph(
+        checkpointer=get_checkpointer(),
+        mode=mode_key,
+        hitl_gates=gates_key,
+        repos=list(repos_key) if repos_key else None,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -208,6 +221,17 @@ def render_event(e: dict) -> None:
         render_hitl_gate(e)
     elif kind == "hitl_decision":
         st.caption(t("ui_hitl_decided", gate=e["gate"], action=e["action"], by=e["by"], feedback=e["feedback"]))
+    elif kind == "publish":
+        if e["status"] == "PUBLISHED":
+            links = "\n".join(f"- {repo}: {url}" for repo, url in e["pr_urls"].items())
+            st.success(t("ui_publish_done", links=links))
+        elif e["status"] == "PUBLISH_FAILED":
+            errors = "\n".join(f"- {err}" for err in e["errors"])
+            if e["pr_urls"]:
+                errors += "\n\n" + "\n".join(f"- {repo}: {url}" for repo, url in e["pr_urls"].items())
+            st.error(t("ui_publish_failed", errors=errors))
+        else:
+            st.info(t("ui_publish_skipped"))
     elif kind == "artifacts":
         with st.expander(t("ui_artifacts", run_dir=e["run_dir"])):
             st.markdown("\n".join(f"- `{f}`" for f in e["files"]))
@@ -285,7 +309,7 @@ if run_clicked:
     elif selected_gates:
         run_config["configurable"] = {"thread_id": uuid.uuid4().hex[:12]}
     st.session_state.run = {
-        "graph_key": (provider, lang, mode, selected_gates),
+        "graph_key": (provider, lang, mode, selected_gates, selected_repos),
         "config": run_config,
         "pending_input": {"messages": [HumanMessage(content=task)]},
         "pending_gate": None,
@@ -374,6 +398,13 @@ if run_state and run_state.get("pending_input") is not None:
                                 "step": step_no,
                                 "agent": node_name,
                                 "text": extract_text(update["messages"][-1].content),
+                            })
+                        if node_name == "finalize" and update.get("publish_status"):
+                            emit({
+                                "kind": "publish",
+                                "status": update["publish_status"],
+                                "pr_urls": update.get("pr_urls") or {},
+                                "errors": update.get("publish_errors") or [],
                             })
                         # Детерминистичният преход на възела (DoD, rework,
                         # одобрение, порта) - показваме причината като route събитие.

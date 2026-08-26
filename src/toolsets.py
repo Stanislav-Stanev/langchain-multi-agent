@@ -15,10 +15,11 @@ Jira през Atlassian MCP. Тук е единственото място, ко
 `import src.graph` работят без mcp пакета и без каквито и да е ключове.
 """
 
+import os
 from dataclasses import dataclass, field
 
 from src.i18n import pick, t
-from src.modes import validate_prod_config
+from src.modes import prod_repos, validate_prod_config, workspace_dir
 from src.plans import make_plan_tools
 from src.tools import (
     check_code_syntax,
@@ -55,6 +56,7 @@ class ProdContext:
     repo_read_tools: list = field(default_factory=list)
     repo_write_tools: list = field(default_factory=list)
     repo_diff_tools: list = field(default_factory=list)
+    prepare_workspaces: object = None  # (ticket_key, run_id) -> None; вика се от init_run
 
 
 @dataclass
@@ -143,17 +145,48 @@ def make_mode_context(mode: str, repos=None):
     if problems:
         raise RuntimeError(t("prod_problems_title") + "\n- " + "\n- ".join(problems))
 
-    # Lazy import: mcp пакетът е нужен само тук, никога в demo режим.
+    # Lazy import: mcp пакетът (и git слоят) са нужни само тук, никога в demo режим.
     from src.jira_mcp import JiraMcpClient, JiraMcpSettings, make_jira_tools
+    from src.publish import GhPublisher, Publisher
+    from src.repo_workspace import MultiWorkspace, RepoWorkspace, branch_name, make_repo_tools
 
     settings = JiraMcpSettings.from_env()
     client = JiraMcpClient(settings)
-    # PR 3 закача git workspace-ите, repo инструментите и publisher-а тук.
+
+    # Репозиториите: всички конфигурирани или само избраните в UI-я (по display име)
+    all_refs = prod_repos()
+    selected = [ref for ref in all_refs if repos is None or ref.display in set(repos)]
+    base_branch = os.getenv("PROD_BASE_BRANCH", "main").strip() or "main"
+    workspaces = {ref.display: RepoWorkspace(ref, workspace_dir(), base_branch=base_branch) for ref in selected}
+    repo_tools = make_repo_tools(workspaces)
+    author = (
+        os.getenv("PROD_GIT_AUTHOR_NAME", "Multi-Bot").strip() or "Multi-Bot",
+        os.getenv("PROD_GIT_AUTHOR_EMAIL", "noreply@multibot.local").strip() or "noreply@multibot.local",
+    )
+    publisher = Publisher(
+        workspaces, GhPublisher(), jira=client, write_back=settings.write_back,
+        author=author, base_branch=base_branch, ticket_url_for=settings.browse_url,
+    )
+
+    def prepare_workspaces(ticket_key: str, run_id: str) -> None:
+        """Clone/fetch + чист branch за run-а във всеки избран репозиторий (вика се от init_run)."""
+        branch = branch_name(ticket_key, run_id)
+        for ws in workspaces.values():
+            ws.prepare()
+            ws.start_run(branch)
+
     return ProdContext(
-        repos=list(repos or []),
+        repos=[ref.display for ref in selected],
         jira=client,
         jira_settings=settings,
         jira_tools=make_jira_tools(client),
+        workspaces=workspaces,
+        workspace_view=MultiWorkspace(workspaces),
+        publisher=publisher,
+        repo_read_tools=repo_tools.read,
+        repo_write_tools=repo_tools.write,
+        repo_diff_tools=repo_tools.diff,
+        prepare_workspaces=prepare_workspaces,
     )
 
 

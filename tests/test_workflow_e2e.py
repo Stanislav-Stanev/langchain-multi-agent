@@ -38,6 +38,7 @@ from tests.conftest import (
     DEFAULT_DEV_OUTPUT,
     EMPTY_PLAN,
     EMPTY_TEST_PLAN,
+    git,
     sample_plan,
     sample_test_plan,
     verdict,
@@ -646,3 +647,144 @@ class TestLanguage:
         assert "finished" in state["reason"]
         plan_md = (only_run_dir(h) / "implementation-plan.md").read_text(encoding="utf-8")
         assert plan_md.startswith("# Implementation plan")
+
+
+class TestProdMode:
+    """Prod режим E2E: реален git workspace над bare repo, фалшива Jira, фалшив gh."""
+
+    CFG = {"configurable": {"thread_id": "prod-1"}, "recursion_limit": 40}
+
+    @staticmethod
+    def _dev_work(ctx, filename="src/feature.py", code="def feature() -> int:\n    return 1\n"):
+        """Симулира Developer: пише файл в workspace-а и отмята стъпка S1."""
+        from src.repo_workspace import RepoWorkspace  # noqa: F401 - за яснота какво се ползва
+
+        def side_effect(run_ctx):
+            ws = ctx.workspaces["acme/demo"]
+            ws.write_file(filename, code)
+            tracker = RunTracker(run_ctx.run_dir)
+            save_plan(tracker, apply_step_update(load_plan(tracker), "S1", "done", "готово"))
+
+        return side_effect
+
+    def test_prod_happy_path_publishes_draft_pr(self, scripted_graph, prod_context, bare_repo):
+        ctx = prod_context()
+        h = scripted_graph(
+            mode="prod",
+            developer_outputs=["Промених src/feature.py по плана."],
+            developer_side_effect=self._dev_work(ctx),
+        )
+
+        state = run(h)
+
+        assert state["mode"] == "prod" and state["final_status"] == "APPROVED"
+        # Артефактът на Developer е реалният diff, не ```python блок
+        assert state["code"].startswith("# repo: acme/demo\n") and "diff --git a/src/feature.py" in state["code"]
+        assert state["publish_status"] == "PUBLISHED"
+        assert state["pr_urls"] == {"acme/demo": "https://github.com/acme/demo/pull/7"}
+        assert "draft Pull Request" in state["reason"]
+
+        # gh е викан веднъж с --draft; branch-ът с промяната е в origin (bare repo)
+        creates = [c for c in ctx.runner.gh_calls if c[1:3] == ["pr", "create"]]
+        assert len(creates) == 1 and "--draft" in creates[0]
+        branches = git(["--git-dir", bare_repo.url, "branch", "--list", "multibot/*"], cwd=h.runs_dir.parent)
+        assert "multibot/dev-101-" in branches
+
+        run_dir = only_run_dir(h)
+        files = set(RunTracker(run_dir).list_artifacts())
+        assert {"code.diff", "pr-body-acme__demo.md", "summary.json", "traceability.md"} <= files
+        body = (run_dir / "pr-body-acme__demo.md").read_text(encoding="utf-8")
+        assert "- `src/feature.py`" in body and "- [x] **S1**" in body
+        summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+        assert summary["publish_status"] == "PUBLISHED" and summary["pr_urls"]["acme/demo"].endswith("/pull/7")
+
+    def test_prod_dod_requires_real_changes(self, scripted_graph, prod_context):
+        # Developer говори, но не пише файлове -> DoD непокрит -> повторен опит -> ескалация
+        ctx = prod_context()
+        h = scripted_graph(mode="prod", developer_outputs=["```python\nx = 1\n```"])
+
+        state = run(h)
+
+        assert len(h.workers["developer"].invocations) == 2
+        retry_history = " ".join(str(m.content) for m in h.workers["developer"].invocations[1])
+        assert "няма променени файлове" in retry_history
+        assert state["final_status"] == "ESCALATED"
+        assert ctx.runner.gh_calls == []  # нищо не е публикувано
+
+    def test_prod_dod_rejects_broken_python(self, scripted_graph, prod_context):
+        ctx = prod_context()
+        h = scripted_graph(
+            mode="prod",
+            developer_outputs=["готово"],
+            developer_side_effect=self._dev_work(ctx, code="def f(:\n"),
+        )
+        state = run(h)
+        retry_history = " ".join(str(m.content) for m in h.workers["developer"].invocations[1])
+        assert "acme/demo:src/feature.py" in retry_history
+        assert state["final_status"] == "ESCALATED"
+
+    def test_publish_gate_shows_diff_and_abort_skips_publishing(self, scripted_graph, prod_context):
+        ctx = prod_context()
+        h = scripted_graph(
+            mode="prod", hitl_gates=("publish",),
+            developer_outputs=["готово"], developer_side_effect=self._dev_work(ctx),
+        )
+
+        events = list(h.graph.stream({"messages": [HumanMessage(content=TASK)]}, config=self.CFG))
+        interrupts = [e["__interrupt__"] for e in events if "__interrupt__" in e]
+        payload = interrupts[0][0].value
+        assert payload["gate"] == "publish"
+        assert payload["preview"].startswith("```diff") and "src/feature.py" in payload["preview"]
+        assert "## Multi-Bot · DEV-101" in payload["pr_body"] and payload["repos"] == ["acme/demo"]
+
+        list(h.graph.stream(Command(resume="q"), config=self.CFG))
+        state = h.graph.get_state(self.CFG).values
+        assert state["final_status"] == "APPROVED"  # QA одобри...
+        assert state["publish_status"] == "SKIPPED_BY_HUMAN"  # ...но човекът не пусна публикуване
+        assert ctx.runner.gh_calls == []
+
+    def test_publish_gate_approve_publishes(self, scripted_graph, prod_context):
+        ctx = prod_context()
+        h = scripted_graph(
+            mode="prod", hitl_gates=("publish",),
+            developer_outputs=["готово"], developer_side_effect=self._dev_work(ctx),
+        )
+        list(h.graph.stream({"messages": [HumanMessage(content=TASK)]}, config=self.CFG))
+        list(h.graph.stream(Command(resume={"action": "approve", "by": "ревюър"}), config=self.CFG))
+        state = h.graph.get_state(self.CFG).values
+        assert state["publish_status"] == "PUBLISHED" and state["pr_urls"]
+        assert state["hitl_decisions"][-1] == {"gate": "publish", "action": "approve", "feedback": "", "by": "ревюър"}
+
+    def test_publish_failure_keeps_qa_approval(self, scripted_graph, prod_context):
+        from tests.conftest import FakeGhRunner
+
+        ctx = prod_context(gh_runner=FakeGhRunner(fail=True))
+        h = scripted_graph(mode="prod", developer_outputs=["готово"], developer_side_effect=self._dev_work(ctx))
+        state = run(h)
+        assert state["final_status"] == "APPROVED" and state["publish_status"] == "PUBLISH_FAILED"
+        assert state["publish_errors"] and "GraphQL" in state["publish_errors"][0]
+        summary = json.loads((only_run_dir(h) / "summary.json").read_text(encoding="utf-8"))
+        assert summary["publish_errors"] == state["publish_errors"]
+
+    def test_jira_write_back_comments_with_pr_link(self, scripted_graph, prod_context):
+        ctx = prod_context(write_back=True)
+        h = scripted_graph(mode="prod", developer_outputs=["готово"], developer_side_effect=self._dev_work(ctx))
+        run(h)
+        assert len(ctx.jira.comments) == 1
+        assert ctx.jira.comments[0]["issueIdOrKey"] == "DEV-101" and "pull/7" in ctx.jira.comments[0]["commentBody"]
+
+    def test_workspace_failure_escalates(self, scripted_graph, prod_context):
+        ctx = prod_context()
+
+        def broken(ticket_key, run_id):
+            raise RuntimeError("clone failed: no network")
+
+        ctx.prepare_workspaces = broken
+        h = scripted_graph(mode="prod")
+        state = run(h)
+        assert state["final_status"] == "ESCALATED"
+        # Причината за ескалацията е записана в журнала на стъпката init_run
+        init_event = RunTracker(only_run_dir(h)).events()[0]
+        assert init_event["node"] == "init_run" and "clone failed" in init_event["reason"]
+        assert all(len(w.invocations) == 0 for w in h.workers.values())  # никой агент не е работил
+        assert state["final_status"] == "ESCALATED"

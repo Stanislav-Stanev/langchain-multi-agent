@@ -50,9 +50,18 @@ class TestModeContext:
         assert isinstance(ctx, ProdContext) and ctx.repos == ["a/b"]
         assert ctx.jira is not None and ctx.jira_settings.email == "e@x.com"
         assert [t.name for t in ctx.jira_tools] == ["get_ticket_details", "search_tickets"]
-        # Git интеграцията идва в PR 3 - още няма workspace/publisher
-        assert ctx.workspace_view is None and ctx.publisher is None
+        # Git слоят: workspace на репозиторий (без мрежа при конструкция), изглед за DoD, publisher
+        assert list(ctx.workspaces) == ["a/b"] and ctx.workspace_view is not None
+        assert ctx.publisher is not None and callable(ctx.prepare_workspaces)
+        assert [t.name for t in ctx.repo_write_tools] == ["write_repo_file", "delete_repo_file"]
         assert "src.jira_mcp" in sys.modules  # импортиран lazy, само за prod
+
+    def test_prod_selection_filters_repos(self, monkeypatch):
+        monkeypatch.setenv("PROD_REPOS", "a/b,c/d")
+        monkeypatch.setenv("JIRA_EMAIL", "e@x.com")
+        monkeypatch.setenv("JIRA_API_TOKEN", "t")
+        assert list(make_mode_context("prod", repos=["c/d"]).workspaces) == ["c/d"]
+        assert list(make_mode_context("prod").workspaces) == ["a/b", "c/d"]
 
 
 class TestMakeTools:
@@ -91,15 +100,28 @@ class TestMakeTools:
         prod = make_tools("prod", WithGit()).prompt_addendum
         assert "write_repo_file" in prod["developer"] and "Do NOT return the code" in prod["developer"]
 
-    def test_prod_without_git_uses_demo_delivery_for_developer_and_qa(self, monkeypatch):
-        # Преходен случай (до PR 3): Jira е реална, git workspace още няма
+    def test_prod_tools_from_real_context(self, monkeypatch):
         monkeypatch.setenv("PROD_REPOS", "a/b")
         monkeypatch.setenv("JIRA_EMAIL", "e@x.com")
         monkeypatch.setenv("JIRA_API_TOKEN", "t")
         ts = make_tools("prod", make_mode_context("prod"))
-        assert [t.name for t in ts.tools["analyst"]] == ["get_ticket_details", "search_tickets"]
+        names = {role: [t.name for t in tools] for role, tools in ts.tools.items()}
+        assert names["analyst"] == ["get_ticket_details", "search_tickets", "list_repo_files", "read_repo_file", "search_repo"]
+        assert names["developer"] == [
+            "get_coding_standards", "update_plan_step", "list_repo_files", "read_repo_file", "search_repo",
+            "write_repo_file", "delete_repo_file", "get_change_diff",
+        ]
+        assert names["qa"] == [
+            "check_code_syntax", "run_test_checklist", "update_test_case",
+            "list_repo_files", "read_repo_file", "search_repo", "get_change_diff",
+        ]
         assert "search_tickets" in ts.prompt_addendum["analyst"]
-        assert "```python" in ts.prompt_addendum["developer"]  # не обещаваме write_repo_file
+        assert "write_repo_file" in ts.prompt_addendum["developer"] and "get_change_diff" in ts.prompt_addendum["qa"]
+
+    def test_prod_context_without_git_falls_back_to_demo_delivery(self):
+        # Защитен случай: ProdContext без repo инструменти -> не обещаваме write_repo_file
+        ts = make_tools("prod", ProdContext())
+        assert "```python" in ts.prompt_addendum["developer"]
         assert "write_repo_file" not in ts.prompt_addendum["developer"]
 
     def test_prod_and_demo_ticket_tools_share_the_contract(self, monkeypatch):

@@ -131,6 +131,12 @@ def main() -> None:
         for problem in problems:
             print(f"  - {problem}")
         sys.exit(1)
+    if mode == "prod":
+        from src.jira_mcp import JiraMcpSettings  # lazy: само prod ползва mcp
+
+        jira = JiraMcpSettings.from_env()
+        print(t("jira_line", cloud=jira.cloud_id, auth=jira.auth))
+        print(t("prod_problem_not_available"))
 
     # Сглобяваме графа (виж src/graph.py за архитектурата).
     # С CHECKPOINT_SQLITE_PATH в .env всяка стъпка се записва в SQLite:

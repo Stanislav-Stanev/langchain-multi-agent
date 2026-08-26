@@ -42,14 +42,19 @@ class DemoContext:
 
 @dataclass
 class ProdContext:
-    """Prod: Jira клиент, git workspace-и и publisher (PR 2 / PR 3)."""
+    """Prod: Jira клиент (+ инструментите му), git workspace-и и publisher (PR 3)."""
 
     mode: str = "prod"
     repos: list = field(default_factory=list)
     jira: object = None
+    jira_settings: object = None
+    jira_tools: list = field(default_factory=list)
     workspaces: dict = field(default_factory=dict)
     workspace_view: object = None
     publisher: object = None
+    repo_read_tools: list = field(default_factory=list)
+    repo_write_tools: list = field(default_factory=list)
+    repo_diff_tools: list = field(default_factory=list)
 
 
 @dataclass
@@ -138,8 +143,18 @@ def make_mode_context(mode: str, repos=None):
     if problems:
         raise RuntimeError(t("prod_problems_title") + "\n- " + "\n- ".join(problems))
 
-    # PR 2 (Jira MCP) и PR 3 (git workspace, draft PR) закачат реалните обекти тук.
-    raise RuntimeError(t("prod_problem_not_available"))
+    # Lazy import: mcp пакетът е нужен само тук, никога в demo режим.
+    from src.jira_mcp import JiraMcpClient, JiraMcpSettings, make_jira_tools
+
+    settings = JiraMcpSettings.from_env()
+    client = JiraMcpClient(settings)
+    # PR 3 закача git workspace-ите, repo инструментите и publisher-а тук.
+    return ProdContext(
+        repos=list(repos or []),
+        jira=client,
+        jira_settings=settings,
+        jira_tools=make_jira_tools(client),
+    )
 
 
 def make_tools(mode: str, ctx) -> RoleToolset:
@@ -164,5 +179,12 @@ def make_tools(mode: str, ctx) -> RoleToolset:
             "qa": [check_code_syntax, run_test_checklist, test_tool, *repo_read, *repo_diff],
         }
 
-    addenda = pick(PROMPT_ADDENDA)[mode]
+    addenda = dict(pick(PROMPT_ADDENDA)[mode])
+    if mode == "prod" and not (repo_write or repo_diff):
+        # Преходен случай (до PR 3): Jira е реална, но git workspace още няма -
+        # Developer/QA работят както в demo (код в ```python блок), за да не им
+        # обещаваме инструменти, които не съществуват.
+        demo_addenda = pick(PROMPT_ADDENDA)["demo"]
+        addenda["developer"] = demo_addenda["developer"]
+        addenda["qa"] = demo_addenda["qa"]
     return RoleToolset(tools=tools, prompt_addendum={role: addenda.get(role, "") for role in ROLES})

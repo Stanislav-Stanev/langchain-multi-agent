@@ -142,14 +142,25 @@ streamlit run app.py
 
 | | demo | prod |
 |---|------|------|
-| Тикети | примерните DEV-101 / DEV-102 (`src/tools.py`) | реална Jira през официалния Atlassian MCP сървър *(следваща стъпка)* |
+| Тикети | примерните DEV-101 / DEV-102 (`src/tools.py`) | **реална Jira** през официалния Atlassian Remote MCP Server (`src/jira_mcp.py`) |
 | Код | ```python блок в отговора на Developer | промени в клонирани git репозитории → draft PR *(следваща стъпка)* |
 | Планове, стъпки, HITL | да | да |
 
-В тази версия prod режимът е избираем, но интеграциите му (Jira MCP, git
-workspace, draft PR) идват в следващите стъпки от
-[docs/prod-mode-plan.md](docs/prod-mode-plan.md) — без конфигурация UI-ят
-показва какво липсва и не пуска run.
+**Jira през MCP (prod).** Analyst ползва същия инструмент `get_ticket_details`,
+но зад него стои официалният Atlassian MCP сървър (`https://mcp.atlassian.com/v1/mcp`):
+`JIRA_MCP_AUTH=api_token` (Basic: `JIRA_EMAIL` + `JIRA_API_TOKEN` от
+<https://id.atlassian.com/manage-profile/security/api-tokens>, неинтерактивно) или
+`oauth` (`npx -y mcp-remote@latest …/authv2`, отваря браузър). `JIRA_CLOUD_ID` е
+hostname-ът на сайта. Картата на тикета е в същия формат като mock-а (+ статус,
+тип, линк); критериите за приемане се четат от custom field (`JIRA_AC_FIELD`)
+или от секцията „Acceptance criteria / Критерии за приемане" в описанието.
+Analyst има и `search_tickets(jql)` за задачи без ключ (JQL винаги ограничен).
+Грешките се връщат като текст, транспортните се повтарят с backoff; `mcp`
+пакетът се импортира само в prod. В UI-я има бутон „Тест на връзката с Jira".
+
+Git интеграцията (workspace, draft PR) идва в следващата стъпка от
+[docs/prod-mode-plan.md](docs/prod-mode-plan.md) — дотогава в prod Developer/QA
+работят както в demo. Без конфигурация UI-ят показва какво липсва и не пуска run.
 
 **Планове преди работа.** Преди Developer възелът `dev_plan` прави план
 за имплементация (критерии за приемане AC-x, стъпки S-x с файлове и

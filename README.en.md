@@ -149,14 +149,26 @@ streamlit run app.py
 
 | | demo | prod |
 |---|------|------|
-| Tickets | the sample DEV-101 / DEV-102 (`src/tools.py`) | real Jira via the official Atlassian MCP server *(next step)* |
+| Tickets | the sample DEV-101 / DEV-102 (`src/tools.py`) | **real Jira** via the official Atlassian Remote MCP Server (`src/jira_mcp.py`) |
 | Code | a ```python block in the Developer's answer | changes in cloned git repositories → draft PR *(next step)* |
 | Plans, steps, HITL | yes | yes |
 
-In this version prod mode is selectable, but its integrations (Jira MCP,
-git workspace, draft PR) arrive in the next steps of
-[docs/prod-mode-plan.md](docs/prod-mode-plan.md) — without configuration
-the UI shows what is missing and does not start a run.
+**Jira via MCP (prod).** The Analyst uses the same `get_ticket_details` tool,
+but behind it is the official Atlassian MCP server (`https://mcp.atlassian.com/v1/mcp`):
+`JIRA_MCP_AUTH=api_token` (Basic: `JIRA_EMAIL` + `JIRA_API_TOKEN` from
+<https://id.atlassian.com/manage-profile/security/api-tokens>, non-interactive) or
+`oauth` (`npx -y mcp-remote@latest …/authv2`, opens a browser). `JIRA_CLOUD_ID` is
+the site hostname. The ticket card has the same format as the mock (+ status,
+type, link); acceptance criteria are read from a custom field (`JIRA_AC_FIELD`)
+or from the "Acceptance criteria / Критерии за приемане" section of the description.
+The Analyst also gets `search_tickets(jql)` for tasks without a key (JQL always bounded).
+Errors come back as text, transport errors are retried with backoff; the `mcp`
+package is imported only in prod. The UI has a "Test the Jira connection" button.
+
+The git integration (workspace, draft PR) arrives in the next step of
+[docs/prod-mode-plan.md](docs/prod-mode-plan.md) — until then, in prod the
+Developer/QA work as in demo. Without configuration the UI shows what is
+missing and does not start a run.
 
 **Plans before work.** Before the Developer the `dev_plan` node produces
 an implementation plan (acceptance criteria AC-x, steps S-x with files and

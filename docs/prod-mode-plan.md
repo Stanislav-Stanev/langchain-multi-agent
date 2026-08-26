@@ -419,10 +419,11 @@ README.md + README.en.md огледално (§4.2), CHANGELOG `[Unreleased]`, C
   default prod, HITL чекбоксове + панел, `plan`/`plan_update`/`artifacts`/`hitl` събития, prod → „не е
   конфигуриран" + Run забранен), `draw_graph.py`, `.gitignore`, `.env.example` (режим, HITL), evals
   `mode="demo"`, conftest + всички засегнати/нови тестове за тази част, README/CHANGELOG/CLAUDE.md за частта.
-- [ ] **PR 2 — Jira през MCP**: `jira_mcp.py`, `requirements.txt` (`mcp`), prod клон на `toolsets.py` за
-  analyst, UI Jira статус + тест на връзката, `JIRA_WRITE_BACK` (обвивка, ползвана в PR 3), `.env.example`
-  (Jira), `test_jira_mcp.py`, docs; **ръчна проверка** срещу `myposgroup.atlassian.net` с реален тикет
-  (еднократно, извън pytest).
+- [x] **PR 2 — Jira през MCP** — виж `docs/plans/2026-08-26_11-02_pr2-jira-mcp.md`: `jira_mcp.py`,
+  `requirements.txt` (`mcp`), prod клон на `toolsets.py` за analyst, UI Jira статус + тест на връзката,
+  `JIRA_WRITE_BACK` (обвивка `add_comment`, ползвана в PR 3), `.env.example` (Jira), `test_jira_mcp.py`, docs;
+  мрежов smoke срещу `mcp.atlassian.com` направен; **ръчната проверка с реален тикет изисква личния API
+  token на потребителя** (бутон „Тест на връзката с Jira" + prod run).
 - [ ] **PR 3 — git workspace + draft PR + порта `approve_publish`**: `repo_workspace.py`, `publish.py`,
   `ProdDoD`, `init_run` prod клон, `approve_publish` (preview на diff/PR body), `finalize` publish,
   `ui_helpers.py`, UI мултиселект/`publish` събитие, `.env.example` (git), тестове с bare repo + fake gh,

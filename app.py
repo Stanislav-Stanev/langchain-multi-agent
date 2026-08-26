@@ -134,6 +134,20 @@ with st.sidebar:
     problems = validate_prod_config(mode)
     if mode == "prod" and problems:
         st.error(t("ui_prod_config_error", problems="\n".join(f"- {p}" for p in problems)))
+    elif mode == "prod":
+        # Jira през Atlassian MCP: сайт + автентикация, и бутон за проверка на връзката.
+        # Тук сме извън run-цикъла, затова директните st.* извиквания са наред.
+        from src.jira_mcp import JiraMcpClient, JiraMcpError, JiraMcpSettings
+
+        _jira_settings = JiraMcpSettings.from_env()
+        st.caption(t("ui_jira_status", cloud=_jira_settings.cloud_id, auth=_jira_settings.auth))
+        if st.button(t("ui_jira_test")):
+            try:
+                details = JiraMcpClient(_jira_settings).test_connection()
+                st.success(t("ui_jira_ok", details=details))
+            except (JiraMcpError, Exception) as exc:  # noqa: BLE001 - показваме всяка грешка в UI-я
+                st.error(t("ui_jira_error", error=exc))
+        st.info(t("ui_prod_git_pending"))
     if mode == "demo":
         st.info(t("ui_demo_hint"))
 

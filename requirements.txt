@@ -43,3 +43,5 @@ ruff==0.16.4
 
 # YAML - golden dataset файловете на eval пакета (tests/evals/cases/)
 pyyaml==6.0.3
+# Официалният MCP SDK - Jira през Atlassian Remote MCP Server (prod режим)
+mcp==1.29.1

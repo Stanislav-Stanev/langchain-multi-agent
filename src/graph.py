@@ -880,7 +880,10 @@ def build_graph(checkpointer=None, *, mode: str | None = None, repos=None, runs_
 
     ctx = make_mode_context(mode, repos)
     toolset = make_tools(mode, ctx)
-    dod = make_dod_policy(mode, getattr(ctx, "workspace_view", None))
+    workspace_view = getattr(ctx, "workspace_view", None)
+    # Преходен случай (до PR 3): prod без git workspace -> Developer предава
+    # кода както в demo (```python блок), затова и DoD е demo политиката.
+    dod = make_dod_policy(mode if workspace_view is not None else "demo", workspace_view)
 
     # LLM клиенти, "закотвени" към Pydantic схемите: with_structured_output
     # гарантира, че отговорът е точно SupervisorDecision / QAVerdict / план.

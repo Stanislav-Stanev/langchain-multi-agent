@@ -219,8 +219,23 @@ STRINGS = {
         "en": "Missing Jira settings: {vars} (see .env.example).",
     },
     "prod_problem_not_available": {
-        "bg": "Prod интеграциите (Jira MCP, git workspace, draft PR) още не са налични в тази версия.",
-        "en": "The prod integrations (Jira MCP, git workspace, draft PR) are not available in this version yet.",
+        "bg": "Git интеграцията на prod режима (workspace, draft PR) идва в следващата стъпка - Developer/QA работят както в demo.",
+        "en": "The prod git integration (workspace, draft PR) arrives in the next step - Developer/QA work as in demo.",
+    },
+    "jira_line": {
+        "bg": "Jira (Atlassian MCP): {cloud} · автентикация: {auth}",
+        "en": "Jira (Atlassian MCP): {cloud} · auth: {auth}",
+    },
+    "ui_jira_status": {
+        "bg": "🔗 Jira през Atlassian MCP: `{cloud}` · автентикация: `{auth}`",
+        "en": "🔗 Jira via Atlassian MCP: `{cloud}` · auth: `{auth}`",
+    },
+    "ui_jira_test": {"bg": "Тест на връзката с Jira", "en": "Test the Jira connection"},
+    "ui_jira_ok": {"bg": "Jira отговаря:\n\n{details}", "en": "Jira responds:\n\n{details}"},
+    "ui_jira_error": {"bg": "Jira не отговаря: {error}", "en": "Jira does not respond: {error}"},
+    "ui_prod_git_pending": {
+        "bg": "Git интеграцията (workspace, draft PR) идва в следващата стъпка - в prod Developer/QA засега работят както в demo.",
+        "en": "The git integration (workspace, draft PR) arrives in the next step - in prod Developer/QA work as in demo for now.",
     },
     "dod_fix_request": {
         "bg": (

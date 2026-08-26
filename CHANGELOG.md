@@ -10,6 +10,17 @@
 
 ## [Unreleased]
 
+### Добавено (Demo / Prod режим — стъпка 2: Jira през MCP)
+- **Реална Jira в prod режим** през официалния Atlassian Remote MCP Server
+  (`src/jira_mcp.py`, пакет `mcp`): Analyst ползва същия инструмент
+  `get_ticket_details` (картата на тикета е в същия формат като mock-а, плюс
+  статус/тип/линк; критериите за приемане от custom field или от секцията в
+  описанието) и нов `search_tickets(jql)`. Автентикация с API token
+  (`JIRA_EMAIL`/`JIRA_API_TOKEN`, Basic) или OAuth през `mcp-remote`;
+  sync мост към async MCP сесията, retry с backoff при транспортни грешки,
+  грешките към агента са текст. Бутон „Тест на връзката с Jira" в UI-я.
+  Git интеграцията (workspace, draft PR) е следващата стъпка.
+
 ### Добавено (Demo / Prod режим — стъпка 1)
 - **Режими** `APP_MODE=prod|demo` (по подразбиране prod; дропдаун в
   Streamlit): demo е учебният режим с примерните тикети; prod е избираем,

@@ -18,6 +18,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 2. Larger initiatives (several PRs) also get a master plan in `docs/` (e.g. `docs/prod-mode-plan.md`: context, decisions table, architecture, file-by-file changes, env, i18n, tests, docs, PR sequence with checkboxes, verification) and each PR's step plan links back to it.
 3. While working, tick the checkboxes and append timestamped notes to **Изпълнение**: what was done, every deviation from the plan and why, bugs found by real runs, what remains for the user. The plan file is committed with the change — it is the audit trail of the work, the same "plan before / record after" discipline the agents themselves follow (`runs/<run>/steps/`).
 4. Trivial edits (typo, one-line fix) may skip the file, but anything touching graph/agents/tools/UI behavior, tests or docs structure must have one.
+5. Delivery always ends with an **open PR, not a merge** — see "Branching workflow" below.
 
 ## Commands
 
@@ -52,7 +53,7 @@ git config core.hooksPath .githooks
 
 ## Branching workflow (enforced by hooks)
 
-**`main` is production.** Never commit or push to it directly — `.githooks/pre-commit` blocks commits on main and `.githooks/pre-push` blocks pushes to main. All work goes on a `feature/<name>` branch, pushed, then merged via PR (`gh pr create --fill` → `gh pr merge --squash --delete-branch`). Emergency escape hatches: `SKIP_MAIN_GUARD=1` or `--no-verify`.
+**`main` is production.** Never commit or push to it directly — `.githooks/pre-commit` blocks commits on main and `.githooks/pre-push` blocks pushes to main. **Every implementation goes on a new `feature/<name>` branch, is pushed, and gets a Pull Request (`gh pr create`) — but Claude does NOT merge it.** Merging into `main` (`gh pr merge --squash --delete-branch`) is the human's decision after reviewing the PR; stop at "PR opened, CI green" and report the PR URL. Do not chain follow-up work on `main` assuming the merge — if the next step depends on an unmerged PR, branch from that PR's branch or wait. Emergency escape hatches: `SKIP_MAIN_GUARD=1` or `--no-verify`.
 
 Release notes live in `CHANGELOG.md` (Keep a Changelog format, Bulgarian). Completed user-facing functionality gets an entry under `[Unreleased]` — the pre-push hook adds these automatically; on release, entries move under a version number.
 
